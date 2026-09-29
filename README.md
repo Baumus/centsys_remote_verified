@@ -118,6 +118,12 @@ The integration code lives under `custom_components/centsys_remote/` in this rep
 
 If you have more than one operator on your account, all of them are added.
 
+### Region / datacentre
+
+Centurion runs separate regional datacentres, and your account (and its gates) lives on exactly one of them. The integration picks the right one **automatically from the country you select** — **Australia** and **New Zealand** use the AU datacentre, everyone else uses South Africa — so there's normally nothing to set. The setup form has a **Datacentre** option that's best left on **Auto (from country)**; the explicit *South Africa* / *Australia & New Zealand* choices are only for the rare case where your number's country and your gate's datacentre don't line up.
+
+> **Gates not showing up, or on the wrong datacentre?** You can change the datacentre later without removing the integration: **Settings → Devices & Services → Centsys Gate Remote → ⋮ → Reconfigure**. Pick the datacentre, and you'll get a fresh one-time PIN on that region to reconnect.
+
 ---
 
 ## Entities
@@ -260,6 +266,7 @@ To turn debug logging back off, remove those lines and restart, or run the **Log
 - **"Centsys Gate Remote" doesn't appear in Add Integration.** Make sure the files are at `config/custom_components/centsys_remote/` (with `manifest.json` directly inside) and that you did a **full restart**. Clear your browser cache if needed.
 - **No PIN arrives.** Confirm you selected the right **country** and entered the same mobile number you use in the Centsys app. If you chose **SMS** and nothing comes through, retry the setup and pick **WhatsApp** instead (it's the channel we've confirmed working). Make sure the chosen app (WhatsApp or your messaging app) is reachable on that number.
 - **A notification says "no gates linked" / the device has no entities.** Login worked, but no operator has your number added as a **remote user**. Open the official MyCentsys Remote app with the same number — if the gate isn't there either, get an admin to add your number as a remote user on the operator (or add/claim the gate to your account). It will then appear here automatically within about a minute — no restart needed. See [Requirements](#requirements).
+- **Signed in fine, but *none* of your gates appear (Australia / New Zealand).** You may be on the wrong **datacentre**. Confirm you selected the correct country at setup, or switch the datacentre via **⋮ → Reconfigure** — see [Region / datacentre](#region--datacentre).
 - **Gate won't open from HA but works in the app.** Check the operator is **Online** in HA, and that your account still has permission in the app. Enable debug logging and capture what happens when you press open.
 - **Battery voltage stays *unknown*.** Wait for a telemetry cycle (up to ~10 minutes), or restart HA. If it never populates, the operator may have been asleep/offline at each attempt — grab debug logs.
 - **State seems to lag.** Steady-state status refreshes about once a minute; live motion is tracked in real time during an open/close. Brief states between polls are expected to be smoothed by the live follow.

@@ -256,3 +256,13 @@ COUNTRIES: list[tuple[str, str, int]] = [
 
 DEFAULT_COUNTRY = "ZA"
 
+# Countries whose Centsys accounts live in the Australia/New Zealand datacentre;
+# everything else uses the South African one. Mirrors the app, which derives the
+# server purely from the registered country.
+_AU_REGION_COUNTRIES = frozenset({"AU", "NZ"})
+
+
+def region_for_country(iso: str | None) -> str:
+    """Return the datacentre region ("au" or "za") for an ISO country code."""
+    return "au" if (iso or "").strip().upper() in _AU_REGION_COUNTRIES else "za"
+

@@ -25,13 +25,14 @@ from .const import (
     CONF_MOBILE_NUMBER,
     CONF_NAME,
     CONF_OTP_PLATFORM,
+    CONF_REGION,
     CONF_TOKEN,
     DEFAULT_OTP_PLATFORM,
     DOMAIN,
     OTP_PLATFORM_SMS,
     OTP_PLATFORM_WHATSAPP,
 )
-from .countries import COUNTRIES, DEFAULT_COUNTRY
+from .countries import COUNTRIES, DEFAULT_COUNTRY, region_for_country
 
 _DIAL_CODES = {iso: dial for iso, _name, dial in COUNTRIES}
 
@@ -40,27 +41,57 @@ _COUNTRY_OPTIONS = [
     for iso, name, dial in COUNTRIES
 ]
 
-USER_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_COUNTRY, default=DEFAULT_COUNTRY): selector.SelectSelector(
+# Datacentre override. "auto" derives the region from the chosen country (the
+# usual case); the two explicit values cover the rare number-vs-gate mismatch.
+REGION_AUTO = "auto"
+_REGION_OPTIONS = [
+    selector.SelectOptionDict(value=REGION_AUTO, label="Auto (from country)"),
+    selector.SelectOptionDict(value="za", label="South Africa"),
+    selector.SelectOptionDict(value="au", label="Australia & New Zealand"),
+]
+
+
+def _resolve_region(country: str, override: str | None) -> str:
+    """Turn the country + optional override into a stored region ("za"/"au")."""
+    if override and override != REGION_AUTO:
+        return override
+    return region_for_country(country)
+
+
+def _account_schema(
+    *,
+    country: str = DEFAULT_COUNTRY,
+    number: str = "",
+    region_override: str = REGION_AUTO,
+    otp_platform: int = DEFAULT_OTP_PLATFORM,
+    include_contact: bool = True,
+) -> vol.Schema:
+    """Build the account form. Shared by initial setup and reconfigure."""
+    fields: dict[Any, Any] = {
+        vol.Required(CONF_COUNTRY, default=country): selector.SelectSelector(
             selector.SelectSelectorConfig(
                 options=_COUNTRY_OPTIONS,
                 mode=selector.SelectSelectorMode.DROPDOWN,
             )
         ),
-        vol.Required(CONF_MOBILE_NUMBER): str,
-        vol.Optional(CONF_NAME): str,
-        vol.Optional(CONF_EMAIL): str,
-        vol.Required(
-            CONF_OTP_PLATFORM, default=str(DEFAULT_OTP_PLATFORM)
-        ): vol.In(
-            {
-                str(OTP_PLATFORM_WHATSAPP): "WhatsApp",
-                str(OTP_PLATFORM_SMS): "SMS",
-            }
-        ),
+        vol.Required(CONF_MOBILE_NUMBER, default=number): str,
     }
-)
+    if include_contact:
+        fields[vol.Optional(CONF_NAME)] = str
+        fields[vol.Optional(CONF_EMAIL)] = str
+    fields[vol.Required(CONF_REGION, default=region_override)] = selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=_REGION_OPTIONS,
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+    fields[vol.Required(CONF_OTP_PLATFORM, default=str(otp_platform))] = vol.In(
+        {
+            str(OTP_PLATFORM_WHATSAPP): "WhatsApp",
+            str(OTP_PLATFORM_SMS): "SMS",
+        }
+    )
+    return vol.Schema(fields)
 
 OTP_SCHEMA = vol.Schema({vol.Required("otp"): str})
 
@@ -84,19 +115,24 @@ class CentsysConfigFlow(ConfigFlow, domain=DOMAIN):
         self._number: str | None = None
         self._name: str | None = None
         self._email: str | None = None
+        self._country: str = DEFAULT_COUNTRY
+        self._region: str = region_for_country(DEFAULT_COUNTRY)
         self._otp_platform: int = DEFAULT_OTP_PLATFORM
         self._reauth_entry: ConfigEntry | None = None
+        self._reconfigure_entry: ConfigEntry | None = None
         self._otp_sent = False
 
     async def _async_send_otp(self) -> str | None:
-        """Start an OTP exchange for ``self._number``.
+        """Start an OTP exchange for ``self._number`` on the account's region.
 
         Returns an error key for the form, or None once the PIN is on its way.
         """
         if not self._number:
             return "cannot_connect"
         self._client = CentsysRemoteClient(
-            self._number, session=async_get_clientsession(self.hass)
+            self._number,
+            session=async_get_clientsession(self.hass),
+            region=self._region,
         )
         try:
             sent = await self._client.send_otp(otp_platform=self._otp_platform)
@@ -120,12 +156,13 @@ class CentsysConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            country = user_input[CONF_COUNTRY]
+            self._country = user_input[CONF_COUNTRY]
             self._number = to_international_number(
-                user_input[CONF_MOBILE_NUMBER], _DIAL_CODES[country]
+                user_input[CONF_MOBILE_NUMBER], _DIAL_CODES[self._country]
             )
             self._name = user_input.get(CONF_NAME)
             self._email = user_input.get(CONF_EMAIL)
+            self._region = _resolve_region(self._country, user_input.get(CONF_REGION))
             self._otp_platform = int(
                 user_input.get(CONF_OTP_PLATFORM, DEFAULT_OTP_PLATFORM)
             )
@@ -142,7 +179,7 @@ class CentsysConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = error
 
         return self.async_show_form(
-            step_id="user", data_schema=USER_SCHEMA, errors=errors
+            step_id="user", data_schema=_account_schema(), errors=errors
         )
 
     async def async_step_otp(
@@ -166,6 +203,8 @@ class CentsysConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_TOKEN: token,
                         CONF_NAME: self._name,
                         CONF_EMAIL: self._email,
+                        CONF_COUNTRY: self._country,
+                        CONF_REGION: self._region,
                         CONF_OTP_PLATFORM: self._otp_platform,
                     },
                 )
@@ -184,10 +223,11 @@ class CentsysConfigFlow(ConfigFlow, domain=DOMAIN):
             self.context["entry_id"]
         )
         self._number = entry_data[CONF_MOBILE_NUMBER]
-        # Entries created before the channel was stored fall back to the default.
+        # Entries created before these were stored fall back to the defaults.
         self._otp_platform = int(
             entry_data.get(CONF_OTP_PLATFORM, DEFAULT_OTP_PLATFORM)
         )
+        self._region = entry_data.get(CONF_REGION, region_for_country(DEFAULT_COUNTRY))
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -219,6 +259,92 @@ class CentsysConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reauth_confirm",
+            data_schema=OTP_SCHEMA,
+            errors=errors,
+            description_placeholders={"number": self._number or ""},
+        )
+
+    # -- reconfigure (change datacentre region) ----------------------------
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Change the account's datacentre region, then re-verify on it.
+
+        Only the region (and OTP channel) can change here; the number -- and thus
+        the entry's identity -- stays the same. A fresh OTP is sent on the chosen
+        datacentre so the stored token is valid there.
+        """
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        assert entry is not None
+        self._reconfigure_entry = entry
+        self._number = entry.data[CONF_MOBILE_NUMBER]
+        self._country = entry.data.get(CONF_COUNTRY, DEFAULT_COUNTRY)
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            self._region = _resolve_region(self._country, user_input.get(CONF_REGION))
+            self._otp_platform = int(
+                user_input.get(CONF_OTP_PLATFORM, DEFAULT_OTP_PLATFORM)
+            )
+            error = await self._async_send_otp()
+            if error is None:
+                return await self.async_step_reconfigure_confirm()
+            errors["base"] = error
+
+        current_region = entry.data.get(
+            CONF_REGION, region_for_country(self._country)
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_REGION, default=current_region
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=_REGION_OPTIONS,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Required(
+                    CONF_OTP_PLATFORM,
+                    default=str(entry.data.get(CONF_OTP_PLATFORM, DEFAULT_OTP_PLATFORM)),
+                ): vol.In(
+                    {
+                        str(OTP_PLATFORM_WHATSAPP): "WhatsApp",
+                        str(OTP_PLATFORM_SMS): "SMS",
+                    }
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"number": self._number or ""},
+        )
+
+    async def async_step_reconfigure_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Validate the OTP and update the entry's region + token in place."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            token, error = await self._async_validate_otp(user_input["otp"])
+            if error:
+                errors["base"] = error
+            elif self._reconfigure_entry is not None:
+                return self.async_update_reload_and_abort(
+                    self._reconfigure_entry,
+                    data={
+                        **self._reconfigure_entry.data,
+                        CONF_REGION: self._region,
+                        CONF_OTP_PLATFORM: self._otp_platform,
+                        CONF_TOKEN: token,
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure_confirm",
             data_schema=OTP_SCHEMA,
             errors=errors,
             description_placeholders={"number": self._number or ""},

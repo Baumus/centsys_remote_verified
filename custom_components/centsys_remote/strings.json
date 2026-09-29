@@ -9,6 +9,7 @@
           "mobile_number": "Mobile number (e.g. 083 123 4567)",
           "name": "Your name (optional)",
           "email": "Email (optional)",
+          "region": "Datacentre",
           "otp_platform": "Send the one-time PIN via"
         }
       },
@@ -25,6 +26,21 @@
         "data": {
           "otp": "One-time PIN"
         }
+      },
+      "reconfigure": {
+        "title": "Change datacentre",
+        "description": "Centsys runs separate datacentres per region. Leave this on **Auto** unless your gates aren't showing up - Australia and New Zealand accounts use the AU datacentre, everyone else uses South Africa. A fresh one-time PIN will be sent to {number} on the datacentre you choose.",
+        "data": {
+          "region": "Datacentre",
+          "otp_platform": "Send the one-time PIN via"
+        }
+      },
+      "reconfigure_confirm": {
+        "title": "Enter the OTP",
+        "description": "Enter the one-time PIN that was just sent to {number} to finish switching datacentre.",
+        "data": {
+          "otp": "One-time PIN"
+        }
       }
     },
     "error": {
@@ -35,7 +51,8 @@
     },
     "abort": {
       "already_configured": "This mobile number is already configured.",
-      "reauth_successful": "Signed in again successfully."
+      "reauth_successful": "Signed in again successfully.",
+      "reconfigure_successful": "Datacentre updated successfully."
     }
   },
   "options": {

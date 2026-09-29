@@ -5,7 +5,6 @@
 # Centsys API (JWT/HS256 bearer auth). Regional endpoints; ZA is the default.
 GATEWAY_URL_ZA = "https://centsys.southafricanorth.cloudapp.azure.com:4445"
 GATEWAY_URL_AU = "https://centsys.australiaeast.cloudapp.azure.com:4445"
-CENTSYS_BASE = GATEWAY_URL_ZA
 
 # MQTT brokers. SMART Wi-Fi operators are controlled over MQTT (mutual TLS,
 # MQTT v5) rather than HTTP -- this is the open_gate() transport.
@@ -36,10 +35,37 @@ GATEWAY_API_SERVICE_LEVEL_JWT = (
     "ZhCrEe6WUCkI-uxlcZlyvPQ5FfAe8P3EiVMswFbquLE"
 )
 
-# Legacy GWeb backend (custom token scheme).
+# Legacy GWeb backend (custom token scheme). The ZA hosts are the historical
+# defaults; the Australia/New Zealand datacentre uses the g-web.com.au /
+# centsys.com.au hosts instead.
 GWEB_BASE = "https://www.gweb.co.za"
 GWEB_ACCESS_BASE = "https://www.gweb.co.za:4446"
 GWEB_SMART_BASE = "https://smart.gweb.co.za"
+
+GWEB_BASE_AU = "https://www.g-web.com.au"
+GWEB_ACCESS_BASE_AU = "https://www.g-web.com.au:4446"
+GWEB_SMART_BASE_AU = "https://smart.centsys.com.au"
+
+# Per-region endpoint sets. The client picks one at construction from the
+# account's region ("za" default, "au" for Australia/New Zealand); every base a
+# request needs is resolved from here, so there are no region branches elsewhere.
+DEFAULT_REGION = "za"
+REGIONS: dict[str, dict[str, str]] = {
+    "za": {
+        "gateway": GATEWAY_URL_ZA,
+        "gweb": GWEB_BASE,
+        "gweb_access": GWEB_ACCESS_BASE,
+        "gweb_smart": GWEB_SMART_BASE,
+        "mqtt": MQTT_IP_ZA,
+    },
+    "au": {
+        "gateway": GATEWAY_URL_AU,
+        "gweb": GWEB_BASE_AU,
+        "gweb_access": GWEB_ACCESS_BASE_AU,
+        "gweb_smart": GWEB_SMART_BASE_AU,
+        "mqtt": MQTT_IP_AU,
+    },
+}
 
 # --- Centsys endpoints ----------------------------------------------------
 

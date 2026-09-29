@@ -2,6 +2,38 @@
 
 Notable changes to the Centsys Gate Remote integration.
 
+## 0.6.1b1 (2026-09-29) — Region / datacentre support (beta)
+
+### New: automatic regional datacentre selection
+
+Centurion runs separate regional datacentres, and each account lives on exactly
+one of them. Until now the integration only talked to the South African
+datacentre, so **Australia / New Zealand** accounts couldn't see their gates.
+
+The datacentre is now chosen **automatically from the country you pick at setup**
+— AU/NZ use the Australia datacentre, everyone else uses South Africa — so there
+is normally nothing to configure. Every backend call (the Azure gateway, the
+GWeb/access-sharing hosts, and the MQTT broker) follows the account's region.
+
+### Changing it later
+
+- The setup form has an optional **Datacentre** dropdown, best left on
+  **Auto (from country)**. The explicit *South Africa* / *Australia & New Zealand*
+  choices cover the rare case where a number's country and its gate's datacentre
+  don't line up.
+- You can switch datacentre after setup without removing the integration:
+  **Settings → Devices & Services → Centsys Gate Remote → ⋮ → Reconfigure**. A
+  fresh one-time PIN is sent on the chosen datacentre to reconnect.
+
+Existing installs are unaffected — entries without a stored region keep using the
+South African datacentre.
+
+### Beta — feedback wanted
+
+This is a prerelease so **Australia / New Zealand** users can confirm their gates
+are discovered and controllable. Please open a GitHub issue with your region and
+operator type (SMART Wi-Fi vs GSM/ULTRA).
+
 ## 0.6.0 (2026-09-26) — Live status (real-time updates)
 
 ### New: opt-in "Live status" mode

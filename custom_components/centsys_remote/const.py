@@ -20,6 +20,10 @@ DEFAULT_OTP_PLATFORM = OTP_PLATFORM_WHATSAPP
 
 CONF_OTP_PLATFORM = "otp_platform"
 
+# Datacentre region for this account ("za" or "au"). Stored resolved on the entry;
+# absent on entries created before region support, which default to "za".
+CONF_REGION = "region"
+
 # Opt-in: keep a persistent MQTT connection open (on a distinct clientId) that
 # streams live gate movement in real time -- catching operation from a physical
 # remote/app/schedule that the periodic cloud poll can miss. Hardware-confirmed

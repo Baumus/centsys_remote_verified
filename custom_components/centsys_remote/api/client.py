@@ -137,17 +137,29 @@ class CentsysRemoteClient:
         session: aiohttp.ClientSession,
         device_info: DeviceInfo | None = None,
         session_token: str | None = None,
+        region: str | None = None,
     ) -> None:
         """
         :param mobile_number: E.164 number, e.g. "+27821234567".
         :param session: an aiohttp ClientSession (caller owns its lifecycle).
         :param device_info: client identity sent to the backend.
         :param session_token: an existing long-lived JWT to reuse (skips OTP login).
+        :param region: datacentre region ("za" or "au"); defaults to "za". Every
+            base URL and the MQTT broker are resolved from it, so the whole client
+            talks to one datacentre.
         """
         self.mobile_number = normalize_msisdn(mobile_number)
         self._session = session
         self.device_info = device_info or DeviceInfo()
         self._session_token = session_token
+
+        # Resolve all regional endpoints once from the account's region.
+        bases = const.REGIONS.get(region or const.DEFAULT_REGION, const.REGIONS[const.DEFAULT_REGION])
+        self._gateway_base = bases["gateway"]
+        self._gweb_base = bases["gweb"]
+        self._gweb_access_base = bases["gweb_access"]
+        self._gweb_smart_base = bases["gweb_smart"]
+        self._mqtt_host = bases["mqtt"]
 
         # GWeb session token ("<hex>|<base64>"), derived after login.
         self._gweb_token: str | None = None
@@ -272,7 +284,7 @@ class CentsysRemoteClient:
 
         Returns True if the backend reports the OTP was sent.
         """
-        url = const.CENTSYS_BASE + const.EP_SEND_OTP
+        url = self._gateway_base + const.EP_SEND_OTP
         body = {
             "MobileNumber": self.mobile_number,
             "OtpPlatform": otp_platform,
@@ -296,7 +308,7 @@ class CentsysRemoteClient:
         Returns the session token. Raises OtpInvalidError if the code is wrong
         (the backend signals this with an empty `response` string).
         """
-        url = const.CENTSYS_BASE + const.EP_VALIDATE_OTP
+        url = self._gateway_base + const.EP_VALIDATE_OTP
         body = {"MobileNumber": self.mobile_number, "Otp": otp}
         _, text = await self._request(
             "POST",
@@ -337,7 +349,7 @@ class CentsysRemoteClient:
 
         # Step 1: encrypted blob from Centsys.
         gweb_url = (
-            f"{const.CENTSYS_BASE}{const.EP_GET_GWEB_TOKEN}"
+            f"{self._gateway_base}{const.EP_GET_GWEB_TOKEN}"
             f"?mobileNumber={quote(self.mobile_number)}"
         )
         _, text = await self._request(
@@ -361,7 +373,7 @@ class CentsysRemoteClient:
         )
         gweb_bearer = base64.b64encode(composed.encode()).decode()
 
-        otp_numb_url = const.GWEB_BASE + const.EP_GWEB_OTP_NUMB
+        otp_numb_url = self._gweb_base + const.EP_GWEB_OTP_NUMB
         form = f"Part1={quote(const.APP_NAME)}&Part2={const.APP_VERSION}"
         _, text = await self._request(
             "POST",
@@ -397,7 +409,7 @@ class CentsysRemoteClient:
         """List the gate operators linked to this number (Centsys)."""
         token = self._require_token()
         url = (
-            f"{const.CENTSYS_BASE}{const.EP_GET_DEVICES}"
+            f"{self._gateway_base}{const.EP_GET_DEVICES}"
             f"?remoteUserNumber={quote(self.mobile_number)}"
         )
         _, text = await self._request(
@@ -417,7 +429,7 @@ class CentsysRemoteClient:
     async def get_operator_overview(self, serial_numbers: list[str]) -> list[OperatorStatus]:
         """Fetch live status for one or more operator serial numbers (Centsys)."""
         token = self._require_token()
-        url = const.CENTSYS_BASE + const.EP_GET_OPERATOR_OVERVIEW
+        url = self._gateway_base + const.EP_GET_OPERATOR_OVERVIEW
         body = {"OperatorSerialNumbers": serial_numbers}
         _, text = await self._request(
             "POST",
@@ -451,7 +463,7 @@ class CentsysRemoteClient:
         ]
         body = "|".join(parts)
 
-        url = const.GWEB_BASE + const.EP_GWEB_CONFIG
+        url = self._gweb_base + const.EP_GWEB_CONFIG
         _, text = await self._request(
             "POST",
             url,
@@ -521,7 +533,7 @@ class CentsysRemoteClient:
             for v in (device_id, identity, io_number)
         )
         url = URL(
-            f"{const.GWEB_BASE}{const.EP_GWEB_ACTIVATE}?data={parts}",
+            f"{self._gweb_base}{const.EP_GWEB_ACTIVATE}?data={parts}",
             encoded=True,
         )
         _, text = await self._request("GET", url, op="MCRActEn", accept="*/*")
@@ -547,7 +559,7 @@ class CentsysRemoteClient:
         data = base64.b64encode(str(device_id).encode()).decode()
         # encoded=True: send the base64 exactly (its '+', '/', '=' unescaped).
         url = URL(
-            f"{const.GWEB_BASE}{const.EP_GWEB_IO_STATES}?data={data}",
+            f"{self._gweb_base}{const.EP_GWEB_IO_STATES}?data={data}",
             encoded=True,
         )
         _, text = await self._request(
@@ -583,7 +595,7 @@ class CentsysRemoteClient:
             base64.b64encode(str(v).encode()).decode()
             for v in (device_id, token, "1")
         )
-        url = URL(f"{const.GWEB_BASE}{const.EP_GWEB_STATUS}?data={parts}", encoded=True)
+        url = URL(f"{self._gweb_base}{const.EP_GWEB_STATUS}?data={parts}", encoded=True)
         _, text = await self._request("GET", url, op="MCRStatus", accept="*/*")
         cleaned = text.replace("\\", "").strip().strip('"')
         if not cleaned or cleaned == "Device is Offline":
@@ -609,7 +621,7 @@ class CentsysRemoteClient:
             base64.b64encode(str(v).encode()).decode()
             for v in (device_id, token, "3")
         )
-        url = URL(f"{const.GWEB_BASE}{const.EP_GWEB_STATUS}?data={parts}", encoded=True)
+        url = URL(f"{self._gweb_base}{const.EP_GWEB_STATUS}?data={parts}", encoded=True)
         _, text = await self._request("GET", url, op="MCRStatus(airtime)", accept="*/*")
         result = text.replace("\\", "").strip().strip('"')
 
@@ -632,7 +644,7 @@ class CentsysRemoteClient:
         Returns the parsed response object. The operator list lives inside the
         ``SerializedVersionedBackup`` field as a nested JSON string.
         """
-        url = const.GWEB_SMART_BASE + const.EP_GWEB_BACKUP
+        url = self._gweb_smart_base + const.EP_GWEB_BACKUP
         status, text = await self._request(
             "POST",
             url,
@@ -669,7 +681,7 @@ class CentsysRemoteClient:
         data. Returns the parsed response, or ``None`` when there is none.
         """
         token = self._require_token()
-        url = const.GWEB_ACCESS_BASE + const.EP_GWEB_ACCESS_SHARING
+        url = self._gweb_access_base + const.EP_GWEB_ACCESS_SHARING
         status, text = await self._request(
             "POST",
             url,
@@ -729,7 +741,7 @@ class CentsysRemoteClient:
             "TriggerId": io_number,
             "TriggerName": action.name,
         }
-        url = const.GWEB_ACCESS_BASE + const.EP_GWEB_ACTIVATION_SEND
+        url = self._gweb_access_base + const.EP_GWEB_ACTIVATION_SEND
         _, text = await self._request(
             "POST",
             url,
@@ -777,7 +789,7 @@ class CentsysRemoteClient:
             "TriggerName": action.name,
             "Result": ACCESS_LOG_RESULT_SUCCESS,
         }
-        url = const.GWEB_ACCESS_BASE + const.EP_GWEB_ACTIVATION_RESULT
+        url = self._gweb_access_base + const.EP_GWEB_ACTIVATION_RESULT
         try:
             await self._request(
                 "POST",
@@ -802,7 +814,7 @@ class CentsysRemoteClient:
         the open command flow.
         """
         token = self._require_token()
-        url = const.CENTSYS_BASE + const.EP_GET_CERTIFICATE
+        url = self._gateway_base + const.EP_GET_CERTIFICATE
         _, text = await self._request(
             "POST",
             url,
@@ -834,7 +846,7 @@ class CentsysRemoteClient:
         return {"pfx_base64": pfx, "password": password or ""}
 
     async def _mqtt_session(
-        self, *, au: bool, client_id_suffix: str = ""
+        self, *, client_id_suffix: str = ""
     ) -> tuple[bytes, bytes, str, str]:
         """Return ``(cert_pem, key_pem, client_id, host)`` for a broker session.
 
@@ -863,7 +875,7 @@ class CentsysRemoteClient:
             self._cert_pem,
             self._key_pem,
             f"{const.MQTT_CLIENT_ID_PREFIX}{self.mobile_number}{client_id_suffix}",
-            const.MQTT_IP_AU if au else const.MQTT_IP_ZA,
+            self._mqtt_host,
         )
 
     def invalidate_certificate(self) -> None:
@@ -889,7 +901,6 @@ class CentsysRemoteClient:
         *,
         mac: str | bytes,
         activation_id: int,
-        au: bool = False,
         timeout: float = 8.0,
     ) -> bool:
         """Run the MQTT activation handshake for one operator.
@@ -914,7 +925,7 @@ class CentsysRemoteClient:
         cmd01 = packets.build_cmd01(self.mobile_number, mac4)
         cmd05 = packets.build_cmd05(mac4)
 
-        cert_pem, key_pem, client_id, host = await self._mqtt_session(au=au)
+        cert_pem, key_pem, client_id, host = await self._mqtt_session()
 
         return await self._run_mqtt(
             lambda: mqtt_remote.open_gate_blocking(
@@ -941,7 +952,6 @@ class CentsysRemoteClient:
         mac: str | bytes,
         is_garage: bool = False,
         activation_id: int | None = None,
-        au: bool = False,
         timeout: float = 8.0,
     ) -> bool:
         """Trigger (open) the gate over MQTT. Returns True if acknowledged.
@@ -956,7 +966,7 @@ class CentsysRemoteClient:
         if activation_id is None:
             activation_id = packets.trigger_activation_id(is_garage=is_garage)
         return await self.send_activation(
-            serial, mac=mac, activation_id=activation_id, au=au, timeout=timeout
+            serial, mac=mac, activation_id=activation_id, timeout=timeout
         )
 
     def _wake_packet(self, mac: str | bytes | None) -> bytes:
@@ -976,7 +986,6 @@ class CentsysRemoteClient:
         serial: str,
         *,
         mac: str | bytes | None = None,
-        au: bool = False,
         timeout: float = 15.0,
     ):
         """Fetch live telemetry from the gate over MQTT.
@@ -996,7 +1005,7 @@ class CentsysRemoteClient:
         from . import mqtt_remote
 
         wake_cmd01 = self._wake_packet(mac)
-        cert_pem, key_pem, client_id, host = await self._mqtt_session(au=au)
+        cert_pem, key_pem, client_id, host = await self._mqtt_session()
 
         return await self._run_mqtt(
             lambda: mqtt_remote.fetch_overview_blocking(
@@ -1018,7 +1027,6 @@ class CentsysRemoteClient:
         callback,
         duration: float,
         mac: str | bytes | None = None,
-        au: bool = False,
     ) -> None:
         """Stream live telemetry for ``duration`` s, calling ``callback(ov)``.
 
@@ -1032,7 +1040,7 @@ class CentsysRemoteClient:
         from . import mqtt_remote
 
         wake_cmd01 = self._wake_packet(mac)
-        cert_pem, key_pem, client_id, host = await self._mqtt_session(au=au)
+        cert_pem, key_pem, client_id, host = await self._mqtt_session()
 
         await self._run_mqtt(
             lambda: mqtt_remote.follow_overview_blocking(
@@ -1057,7 +1065,6 @@ class CentsysRemoteClient:
         on_connected=None,
         stop_event,
         wake_interval: float | None = None,
-        au: bool = False,
     ) -> str:
         """Hold one persistent connection streaming telemetry until stopped.
 
@@ -1084,7 +1091,7 @@ class CentsysRemoteClient:
                 wakes[serial] = self._wake_packet(mac)
 
         cert_pem, key_pem, client_id, host = await self._mqtt_session(
-            au=au, client_id_suffix=const.LISTENER_CLIENT_SUFFIX
+            client_id_suffix=const.LISTENER_CLIENT_SUFFIX
         )
 
         return await self._run_mqtt(

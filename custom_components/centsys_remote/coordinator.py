@@ -26,6 +26,7 @@ from .const import (
     CONF_ENABLE_LIVE_LISTENER,
     CONF_MOBILE_NUMBER,
     CONF_PRODUCT_CODES,
+    CONF_REGION,
     CONF_TOKEN,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -79,6 +80,9 @@ class CentsysCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             entry.data[CONF_MOBILE_NUMBER],
             session=session,
             session_token=entry.data[CONF_TOKEN],
+            # Entries created before region support omit this; the client then
+            # falls back to the default (ZA) datacentre.
+            region=entry.data.get(CONF_REGION),
         )
         self._overview: dict[str, Any] = {}
         # Product codes the operator reported about itself over telemetry, kept
