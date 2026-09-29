@@ -260,24 +260,20 @@ class CentsysCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         None when we've never seen a code for this serial, so a caller uses the
         safe default rather than guessing.
         """
-        family = enums.product_family(self._reported_codes.get(serial))
-        if family == "garage":
-            return "garage"
-        if family in ("slider", "swing"):
-            return "gate"
-        return None
+        return enums.gate_or_garage(self._reported_codes.get(serial))
 
-    def is_known_garage(self, serial: str) -> bool:
-        """Whether this operator is known to be a garage door.
+    def is_known_gate(self, serial: str) -> bool:
+        """Whether this operator is positively known to be a gate (not a garage).
 
         True from live telemetry or a product code the operator reported before.
-        Used to withhold gate-only controls, where a wrong guess would move a
-        door, so an unknown operator answers False.
+        Gate-only controls are created only when this is True, so an operator we
+        haven't positively classified (unknown, or a garage) never gets them --
+        the Holiday Lock id opens a garage, so guessing wrong would move a door.
         """
         overview = self._overview.get(serial)
-        if overview is not None and overview.is_garage:
+        if overview is not None and overview.is_gate:
             return True
-        return self.learned_family(serial) == "garage"
+        return self.learned_family(serial) == "gate"
 
     def async_force_telemetry(self) -> None:
         """Let the next update read MQTT telemetry, ignoring its slow cadence.

@@ -298,12 +298,7 @@ class DeviceOverview:
     @property
     def reported_family(self) -> str | None:
         """"garage" or "gate" from the operator's reported product code, else None."""
-        fam = enums.product_family(self.reported_product_code)
-        if fam == "garage":
-            return "garage"
-        if fam in ("slider", "swing"):
-            return "gate"
-        return None
+        return enums.gate_or_garage(self.reported_product_code)
 
     @property
     def is_garage(self) -> bool:
@@ -321,12 +316,17 @@ class DeviceOverview:
     def is_gate(self) -> bool:
         """Whether this is a gate operator (a sliding or swing gate).
 
-        Prefers the reported product code; an unrecognised operator answers
-        False, so a gate-only action is withheld rather than guessed.
+        Prefers the reported product code. If the operator reported a code we
+        don't recognise as a gate, we do NOT fall back to the frame shape -- a
+        garage can broadcast a gate-shaped frame, so trusting it would offer
+        gate-only controls on a garage. The frame-shape fallback applies only
+        when the operator reported no code at all.
         """
         reported = self.reported_family
         if reported is not None:
             return reported == "gate"
+        if self.reported_product_code is not None:
+            return False
         return self.family in GATE_FAMILIES
 
     @property
@@ -368,7 +368,9 @@ class DeviceOverview:
 # temperature sit); the flag/timer block that follows is shared. Two lengths
 # share a layout with a different label: a 52-byte body is a separate product
 # line (its battery reads ~13 V rather than ~27 V), and a 64-byte body is a
-# zero-padded ``v2`` frame.
+# zero-padded ``v2`` frame. Garage frames start at 24 bytes; a newer variant
+# appends a second notification word (>= 28 bytes) but keeps the same head, so
+# any 24-35 byte body falls back to the garage layout below.
 _BODY_LAYOUTS: dict[int, tuple[str, str]] = {
     24: ("sdo5", "sdo5"),
     36: ("v2", "v2"),
@@ -377,16 +379,34 @@ _BODY_LAYOUTS: dict[int, tuple[str, str]] = {
     64: ("v2", "v2"),
 }
 
+# The (struct layout, family label) each operator family uses. Selecting the
+# decoder from the operator's reported family is more reliable than guessing
+# from the body length, because a garage can broadcast a gate-sized frame.
+_FAMILY_LAYOUTS: dict[str, tuple[str, str]] = {
+    "garage": ("sdo5", "sdo5"),
+    "slider": ("v2", "v2"),
+    "swing": ("vx", "vx"),
+}
+# Smallest body each layout can decode without overrunning.
+_LAYOUT_MIN_LEN: dict[str, int] = {"sdo5": 24, "v2": 36, "vx": 38}
 
-def _layout_for(length: int, *, strict: bool = False) -> tuple[str, str]:
+
+def _layout_for(
+    length: int, *, reported_code: int | None = None, strict: bool = False
+) -> tuple[str, str]:
     """Return the (struct layout, family) to decode a body of this length.
 
-    An unknown length is decoded with the nearest known layout rather than
-    dropped: the flag/timer block is shared across the gate families, so the
-    useful fields still land even on an operator we haven't catalogued. When
-    ``strict`` is set an unknown length raises instead -- used on a multiplexed
-    topic where non-telemetry messages must not be force-decoded as a frame.
+    The operator's reported product code wins when present -- a garage whose
+    frame length happens to look like a gate still decodes as a garage -- so the
+    byte-length heuristic is only the fallback for an operator that reported no
+    code. An unknown length is then decoded with the nearest known layout (the
+    flag/timer block is shared) rather than dropped -- unless ``strict`` is set,
+    used on a multiplexed topic where non-telemetry messages must not be
+    force-decoded.
     """
+    by_family = _FAMILY_LAYOUTS.get(enums.product_family(reported_code) or "")
+    if by_family is not None and length >= _LAYOUT_MIN_LEN[by_family[0]]:
+        return by_family
     known = _BODY_LAYOUTS.get(length)
     if known is not None:
         return known
@@ -410,27 +430,47 @@ def reported_product_code(properties) -> int | None:
     The operator tags each message with keyed user-properties; ``PC`` is its own
     product code. Returns None when absent or not an integer.
     """
-    for key, value in getattr(properties, "UserProperty", None) or []:
+    props = getattr(properties, "UserProperty", None) or []
+    value: int | None = None
+    for key, raw in props:
         if key == "PC":
             try:
-                return int(str(value).strip())
+                value = int(str(raw).strip())
             except (TypeError, ValueError):
-                return None
-    return None
+                value = None
+            break
+    if _LOGGER.isEnabledFor(logging.DEBUG):
+        # Keys only (values can carry serial/MAC); PC is the family signal.
+        _LOGGER.debug(
+            "deviceOverview user-property keys=%s PC=%s",
+            [k for k, _ in props],
+            value,
+        )
+    return value
 
 
-def parse_device_overview(payload: bytes, *, strict: bool = False) -> DeviceOverview:
+def parse_device_overview(
+    payload: bytes, *, reported_code: int | None = None, strict: bool = False
+) -> DeviceOverview:
     """Decode a raw deviceOverview MQTT payload into structured telemetry.
 
     ``payload`` is the full MQTT payload; the leading 4-byte header is stripped
-    here (matching the app). Raises ValueError if the body length is unusable --
-    with ``strict`` any length that isn't an exact known layout (see
-    ``_layout_for``), used when reading a topic that also carries non-telemetry
-    messages.
+    here. ``reported_code`` is the operator's own product code (from the message
+    properties) and, when recognised, selects the decoder by family rather than
+    by body length. Raises ValueError if the body length is unusable -- with
+    ``strict`` any length that isn't an exact known layout (see ``_layout_for``),
+    used when reading a topic that also carries non-telemetry messages.
     """
     body = bytes(payload)[4:]
     n = len(body)
-    layout, family = _layout_for(n, strict=strict)
+    layout, family = _layout_for(n, reported_code=reported_code, strict=strict)
+    if _LOGGER.isEnabledFor(logging.DEBUG):
+        _LOGGER.debug(
+            "deviceOverview decode: body=%d bytes family=%s reported_code=%s",
+            n,
+            family,
+            reported_code,
+        )
 
     if layout == "v2":
         (
@@ -472,7 +512,10 @@ def parse_device_overview(payload: bytes, *, strict: bool = False) -> DeviceOver
         nf1, batt, cond, _pad, secs, _timer, _pad2, gate_st, irbc, _xmr, power = (
             struct.unpack_from("<IHBBHBBBBBB", body, 0)
         )
-        nf2, temp, irbo, in_v = 0, None, 0, 0
+        # Newer garage firmware appends a second 32-bit notification word after
+        # the shared 24-byte head; older frames stop at 24 and have no high word.
+        nf2 = struct.unpack_from("<I", body, 24)[0] if n >= 28 else 0
+        temp, irbo, in_v = None, 0, 0
         gate_position = None
 
     temp_c = temp if temp is None else (temp - 256 if temp > 127 else temp)
@@ -499,7 +542,23 @@ def parse_device_overview(payload: bytes, *, strict: bool = False) -> DeviceOver
         gate_position=gate_position,
         notification_flags=(nf2 << 32) | nf1,
         condition_flags=cond,
+        reported_product_code=reported_code,
     )
+
+
+def overview_from_message(msg, *, strict: bool = False) -> DeviceOverview | None:
+    """Decode a deviceOverview MQTT message into telemetry, or None if unusable.
+
+    Reads the operator's product code from the message properties (so the family
+    can drive decoding) and returns None instead of raising for a payload whose
+    length isn't a telemetry frame -- callers on a multiplexed topic pass
+    ``strict=True`` so non-telemetry messages are dropped rather than force-fit.
+    """
+    code = reported_product_code(msg.properties)
+    try:
+        return parse_device_overview(msg.payload, reported_code=code, strict=strict)
+    except ValueError:
+        return None
 
 
 def pfx_to_pem(pfx_b64: str, password: str) -> tuple[bytes, bytes]:
@@ -775,11 +834,9 @@ def follow_overview_blocking(
         if msg.topic == t_req_resp:
             conn_resp.set()
         elif msg.topic in (t_overview, t_sysurc) and msg.payload:
-            try:
-                ov = parse_device_overview(msg.payload, strict=msg.topic == t_sysurc)
-            except ValueError:
+            ov = overview_from_message(msg, strict=msg.topic == t_sysurc)
+            if ov is None:
                 return
-            ov.reported_product_code = reported_product_code(msg.properties)
             try:
                 on_overview(ov)
             except Exception:  # noqa: BLE001 - never let a callback kill the loop
@@ -874,11 +931,9 @@ def fetch_overview_blocking(
         if msg.topic == t_req_resp:
             conn_resp.set()
         elif msg.topic in (t_overview, t_sysurc) and msg.payload:
-            try:
-                ov = parse_device_overview(msg.payload, strict=msg.topic == t_sysurc)
-            except ValueError:
+            ov = overview_from_message(msg, strict=msg.topic == t_sysurc)
+            if ov is None:
                 return
-            ov.reported_product_code = reported_product_code(msg.properties)
             holder["overview"] = ov
             got_overview.set()
 
@@ -986,11 +1041,9 @@ def listen_overview_blocking(
             strict = True
         if serial is None or not msg.payload:
             return
-        try:
-            ov = parse_device_overview(msg.payload, strict=strict)
-        except ValueError:
+        ov = overview_from_message(msg, strict=strict)
+        if ov is None:
             return
-        ov.reported_product_code = reported_product_code(msg.properties)
         try:
             on_overview(serial, ov)
         except Exception:  # noqa: BLE001 - never let a callback kill the loop

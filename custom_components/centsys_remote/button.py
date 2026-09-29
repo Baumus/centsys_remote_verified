@@ -34,9 +34,10 @@ async def async_setup_entry(
         data = coordinator.data.get(key) or {}
         kind = data.get("kind")
         if kind == "wifi":
-            # Garage-door operators have no pedestrian mode, so skip anything we
-            # know is a garage.
-            if coordinator.is_known_garage(key):
+            # Pedestrian is a gate concept (garage-door operators have no
+            # pedestrian mode), so create it only once the operator is positively
+            # a gate; the dynamic setup adds it later if it turns out to be one.
+            if not coordinator.is_known_gate(key):
                 return []
             return [CentsysWifiPedestrianButton(coordinator, key)]
         if kind == "shared":

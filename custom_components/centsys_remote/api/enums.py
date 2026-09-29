@@ -90,6 +90,21 @@ def product_family(code: int | None) -> str | None:
     return None
 
 
+def gate_or_garage(code: int | None) -> str | None:
+    """Collapse a reported product code to the control-relevant distinction.
+
+    Sliders and swings are both "gate" (they share the same activation set);
+    garages are "garage". None when the code is unrecognised, so callers take a
+    safe default rather than guessing.
+    """
+    family = product_family(code)
+    if family == "garage":
+        return "garage"
+    if family in ("slider", "swing"):
+        return "gate"
+    return None
+
+
 def _label(enum_cls: type[IntEnum], value: int | None) -> str | None:
     """Human-friendly lower_snake label for a raw int, or None if unmappable."""
     if value is None:

@@ -56,9 +56,11 @@ async def async_setup_entry(
     def _factory(key: str):
         data = coordinator.data.get(key) or {}
         if data.get("kind") == "wifi":
-            # These modes are a gate concept; on a garage the Holiday Lock id
-            # would open the door, so skip anything we know is a garage.
-            if coordinator.is_known_garage(key):
+            # These modes are a gate concept, and the Holiday Lock id opens a
+            # garage door -- so create them only once the operator is positively
+            # a gate. An unclassified operator (or a garage) gets none; the
+            # dynamic setup adds them later if it turns out to be a gate.
+            if not coordinator.is_known_gate(key):
                 return []
             return [CentsysFlagSwitch(coordinator, key, d) for d in FLAG_SWITCHES]
         if data.get("kind") != "gsm":

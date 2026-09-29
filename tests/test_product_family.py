@@ -50,3 +50,13 @@ def test_product_type_is_not_the_signal() -> None:
     # productType 50 has shipped as both a gate and a garage, so there must be
     # no family lookup keyed on it.
     assert not hasattr(enums, "product_type_family")
+
+
+def test_gate_or_garage_collapses_family() -> None:
+    # Sliders and swings are both "gate" (shared activation set); garages stand
+    # apart; anything unrecognised is None so callers take the safe default.
+    assert enums.gate_or_garage(41) == "gate"  # slider
+    assert enums.gate_or_garage(25) == "gate"  # swing
+    assert enums.gate_or_garage(39) == "garage"
+    assert enums.gate_or_garage(51) is None
+    assert enums.gate_or_garage(None) is None

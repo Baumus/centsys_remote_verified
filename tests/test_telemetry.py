@@ -256,3 +256,56 @@ def test_reported_product_code_reads_the_pc_property() -> None:
         UserProperty = [("ClientId", "x")]
 
     assert mqtt_remote.reported_product_code(_NoPc()) is None
+
+
+def test_reported_code_is_stored_on_the_overview() -> None:
+    # parse() records the reported code it was given, so is_gate/is_garage act
+    # on it without a second assignment by the caller.
+    ov = mqtt_remote.parse_device_overview(_v2_frame(), reported_code=41)
+    assert ov.reported_product_code == 41
+
+
+def test_reported_but_unrecognised_code_is_never_a_gate() -> None:
+    # A present-but-unmapped code (e.g. an SDO whose cloud number 51 leaked onto
+    # the wire) must NOT fall back to the gate-shaped frame -- withhold gate
+    # controls rather than risk the Holiday Lock id opening a garage door.
+    ov = mqtt_remote.parse_device_overview(_v2_frame(), reported_code=51)
+    assert ov.reported_product_code == 51
+    assert ov.reported_family is None
+    assert ov.is_gate is False
+    assert ov.is_garage is False
+
+
+def test_decode_by_reported_family_ignores_the_byte_length() -> None:
+    # A garage that broadcasts a gate-sized (36-byte) body still decodes as the
+    # garage layout when it reports a garage product code -- mirroring the app,
+    # which selects its decoder by product code, not by body length.
+    ov = mqtt_remote.parse_device_overview(_v2_frame(), reported_code=39)
+    assert ov.family == "sdo5"
+    assert ov.is_garage is True and ov.is_gate is False
+    # A slider code keeps the gate layout for the same length.
+    ov2 = mqtt_remote.parse_device_overview(_v2_frame(), reported_code=41)
+    assert ov2.family == "v2"
+    assert ov2.is_gate is True
+
+
+def test_gdo_overview_v4_reads_the_high_notification_word() -> None:
+    # Newer garage firmware appends a second 32-bit notification word at offset
+    # 24; the shared first 24 bytes decode exactly as the older frame.
+    body = bytearray(28)
+    body[0:4] = (1 << 10).to_bytes(4, "little")  # nf1 bit 10
+    body[4:6] = (130).to_bytes(2, "little")  # 13.0 V on the sdo5 scale
+    body[24:28] = (1 << 5).to_bytes(4, "little")  # nf2 bit 5 -> combined bit 37
+    ov = mqtt_remote.parse_device_overview(_HEADER + bytes(body))
+    assert ov.family == "sdo5"  # 28 bytes falls in the garage range
+    assert ov.battery_voltage == 13.0
+    assert ov.notification_flags >> 10 & 1  # low word preserved
+    assert ov.notification_flags >> (32 + 5) & 1  # high word read from offset 24
+
+
+def test_v3_garage_frame_has_no_high_notification_word() -> None:
+    # The 24-byte frame stops before the high word; nothing spurious is read.
+    body = bytearray(24)
+    body[0:4] = (1 << 3).to_bytes(4, "little")
+    ov = mqtt_remote.parse_device_overview(_HEADER + bytes(body))
+    assert ov.notification_flags == (1 << 3)

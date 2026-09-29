@@ -27,25 +27,33 @@ def async_setup_dynamic_entities(
     async_add_entities: AddEntitiesCallback,
     factory: Callable[[str], Iterable[Entity]],
 ) -> None:
-    """Add entities for each gate, now and as new gates appear on later polls.
+    """Add entities for each gate, now and as new gates (or family-gated
+    controls) appear on later polls.
 
     The device list is re-fetched on every coordinator update, so a gate that
     gets linked to the account after setup (e.g. once the user is added as a
     remote user) shows up automatically without reloading the integration.
+
+    The factory is re-run every update and its output de-duplicated by
+    ``unique_id``, so an entity the factory withholds until it has enough
+    information -- e.g. a gate-only control that waits for the operator to be
+    positively classified as a gate rather than a garage -- is added later once
+    it becomes eligible, without ever double-adding one already present.
     """
-    known: set[str] = set()
+    added: set[str] = set()
 
     @callback
     def _sync() -> None:
-        new = [serial for serial in coordinator.data if serial not in known]
-        if not new:
-            return
-        known.update(new)
-        entities: list[Entity] = []
-        for serial in new:
-            entities.extend(factory(serial))
-        if entities:
-            async_add_entities(entities)
+        fresh: list[Entity] = []
+        for serial in coordinator.data:
+            for entity in factory(serial):
+                uid = entity.unique_id
+                if uid is None or uid in added:
+                    continue
+                added.add(uid)
+                fresh.append(entity)
+        if fresh:
+            async_add_entities(fresh)
 
     _sync()
     entry.async_on_unload(coordinator.async_add_listener(_sync))
