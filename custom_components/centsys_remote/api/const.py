@@ -74,6 +74,7 @@ EP_VALIDATE_OTP = "/ValidateOtp"
 EP_GET_GWEB_TOKEN = "/GetGwebToken"  # ?mobileNumber=<phone>
 EP_ADD_OR_UPDATE_USER = "/AddOrUpdateMyCentsysRemoteUserInformation"
 EP_GET_DEVICES = "/GetDevicesByRemoteUserNumber"  # ?remoteUserNumber=<phone>
+EP_GET_DEVICES_BY_ADMIN = "/GetDevicesByAdminNumber"  # ?adminNumber=<phone>
 EP_GET_OPERATOR_OVERVIEW = "/GetOperatorOverview"
 EP_GET_ELIGIBLE_TO_RATE = "/GetEligibleUserToRate"  # ?PhoneNumber=<phone>
 # Returns the MQTT client certificate (mutual TLS) used to reach the broker.

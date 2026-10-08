@@ -19,7 +19,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import CentsysRemoteClient, enums
 from .api.exceptions import CentsysAuthError, CentsysError
-from .api.models import SharedAccess, parse_shared_accesses
+from .api.models import SharedAccess, merge_devices, parse_shared_accesses
 from .const import (
     AIRTIME_POLL_ATTEMPTS,
     AIRTIME_POLL_INTERVAL,
@@ -110,6 +110,9 @@ class CentsysCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._no_devices_issue = f"no_devices_{entry.entry_id}"
         self._shared_readonly_issue = f"shared_readonly_{entry.entry_id}"
         self._backup_diagnostic_done = False
+        # Serials the admin lookup adds over the remote-user list; cached so the
+        # discovery notice is logged only when the set changes, not every poll.
+        self._admin_only_serials: frozenset[str] = frozenset()
         self._gsm_devices: list[Any] = []
         self._gsm_loaded = False
         self._last_gsm = 0.0
@@ -348,6 +351,25 @@ class CentsysCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         try:
             devices = await self.client.get_devices()
+            # Union a second discovery source: operators where this number is an
+            # admin (a separate authority from the remote-user list; each can
+            # list operators the other omits). Tolerant, and deduped by serial.
+            admin_devices = await self.client.get_admin_devices()
+            remote_serials = {d.serial_number for d in devices}
+            devices = merge_devices(devices, admin_devices)
+            admin_only = frozenset(
+                d.serial_number
+                for d in admin_devices
+                if d.serial_number and d.serial_number not in remote_serials
+            )
+            if admin_only != self._admin_only_serials:
+                self._admin_only_serials = admin_only
+                if admin_only:
+                    _LOGGER.info(
+                        "Admin lookup surfaced operator(s) not in the "
+                        "remote-user list: %s",
+                        sorted(admin_only),
+                    )
             serials = [d.serial_number for d in devices if d.serial_number]
             statuses = {}
             if serials:

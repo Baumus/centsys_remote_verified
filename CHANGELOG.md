@@ -2,6 +2,21 @@
 
 Notable changes to the Centsys Gate Remote integration.
 
+## 0.6.3b1 (2026-10-08) — Find gates linked by admin as well as remote user (beta)
+
+### New: admin-linked gates are now discovered
+
+Some accounts are set up as an **operator admin** rather than (or as well as) a
+**remote user**. Those are two separate lists on Centurion's side, and until now
+the integration only read the remote-user one — so a gate that showed up in the
+app could be missing from Home Assistant with a "no gates linked" notice.
+
+The integration now also checks the admin list and **combines both**, removing
+duplicates, so a gate linked either way appears. There is nothing to configure,
+and accounts that were already working are unaffected (a gate linked both ways is
+shown once). The extra lookup is best-effort: if it is unavailable it is simply
+skipped and never interrupts the normal update.
+
 ## 0.6.1b1 (2026-09-29) — Region / datacentre support (beta)
 
 ### New: automatic regional datacentre selection

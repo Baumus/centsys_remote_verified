@@ -426,6 +426,44 @@ class CentsysRemoteClient:
         _LOGGER.debug("[GetDevices] %d operator(s)", len(data))
         return [Device.from_json(d) for d in data]
 
+    async def get_admin_devices(self) -> list[Device]:
+        """List operators where this number is an operator *admin* (Centsys).
+
+        A separate listing from ``get_devices`` (operators where the number is a
+        *remote user*): an account can be an admin on an operator without being a
+        remote user, and vice versa, so each list can contain operators the other
+        omits. The coordinator unions them.
+
+        This augments primary discovery, so it is tolerant: a number that is not
+        an admin anywhere (HTTP 400/404) or a transient failure both yield an
+        empty list rather than failing the update.
+        """
+        token = self._require_token()
+        url = (
+            f"{self._gateway_base}{const.EP_GET_DEVICES_BY_ADMIN}"
+            f"?adminNumber={quote(self.mobile_number)}"
+        )
+        try:
+            status, text = await self._request(
+                "POST",
+                url,
+                op="GetDevicesByAdmin",
+                bearer=token,
+                content_type="application/json; charset=utf-8",
+                # Not an admin anywhere -> 400/404: a normal empty result.
+                expected_status=(200, 400, 404),
+            )
+        except CentsysError as err:
+            _LOGGER.debug("[GetDevicesByAdmin] skipped: %s", err)
+            return []
+        if status != 200:
+            return []
+        data = self._parse_json(text)
+        if not isinstance(data, list):
+            return []
+        _LOGGER.debug("[GetDevicesByAdmin] %d operator(s)", len(data))
+        return [Device.from_json(d) for d in data]
+
     async def get_operator_overview(self, serial_numbers: list[str]) -> list[OperatorStatus]:
         """Fetch live status for one or more operator serial numbers (Centsys)."""
         token = self._require_token()

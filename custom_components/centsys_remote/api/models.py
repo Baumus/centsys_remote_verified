@@ -76,6 +76,22 @@ class Device:
         )
 
 
+def merge_devices(primary: list[Device], extra: list[Device]) -> list[Device]:
+    """Union two operator lists, deduped by serial (primary wins).
+
+    Order: primary entries first, then extra-only; entries without a serial are
+    dropped (they cannot key an entity or an MQTT topic).
+    """
+    seen: set[str] = set()
+    merged: list[Device] = []
+    for device in (*primary, *extra):
+        if not device.serial_number or device.serial_number in seen:
+            continue
+        seen.add(device.serial_number)
+        merged.append(device)
+    return merged
+
+
 def _pick(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
     """Return the first present key (case-tolerant) from a dict."""
     for key in keys:
