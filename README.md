@@ -43,18 +43,22 @@ Gates you don't own but have been **shared** with your number (in the app's *Acc
 - **GSM/ULTRA (cellular) shared gates — supported.** These are triggered through the cellular gateway, which works from anywhere, so they appear as a gate/buttons like any other GSM gate. If your access is limited, a **Remaining triggers** and/or **Access expires** sensor is added, and the control goes unavailable once the share is depleted, expired or revoked. (Experimental — please report how it goes.)
 - **SMART (Wi-Fi) shared gates — view-only.** The official app opens a *shared* Wi-Fi gate over **Bluetooth while you're at the gate** (a shared user has no remote credentials for someone else's operator), so there is no remote way to trigger it — not from Home Assistant, and not from the app when you're away. These are shown **read-only**: you get the device plus *Access expires* / *Remaining triggers* sensors, and a Repair notice explaining the limitation, but **no controls** (triggering would only notify the owner without moving the gate). If it's *your own* Wi-Fi gate, add it with the owning number instead — then it's a normal, fully-supported SMART operator.
 
-### Known-good devices
+### Known devices
+
+A quick reference of what we've seen so far — ✅ works, ❌ can't work. The deciding factor is almost always the connection: Wi-Fi and GSM/cellular operators are reachable remotely; **Bluetooth-only** operators are not (they only open from the app while you're at the gate, so nothing — the app included — can control them remotely).
 
 | Device | Connection | Status |
 | --- | --- | --- |
 | **Centurion D5-Evo SMART+** | Wi-Fi | ✅ Fully tested — control + pedestrian open + live status + diagnostics |
 | **Centurion D6 SMART+** | Wi-Fi | ✅ Tested — control + live status + diagnostics |
 | **Centurion SD05 SMART+** (garage door) | Wi-Fi | ✅ Tested — control + live status |
+| **Centurion Vantage** (swing) | Wi-Fi | ✅ Reported working by a user — control + live status |
 | **G-SPEAK 4G** module | GSM/cellular | ✅ Tested — gate + auxiliary IOs (pedestrian, lock) |
 | **G-ULTRA 3G** module | GSM/cellular | ✅ Tested — gate + auxiliary IOs (pedestrian, lock, garage) |
 | **G-ULTRA 2G** module | GSM/cellular | ✅ Tested — gate + auxiliary IOs (pedestrian, lock, courtesy light) |
+| **Centurion D10 SMART** | Bluetooth-only | ❌ Not supported — Bluetooth-only, so there's no remote control (the Wi-Fi version is the **D10 SMART+**) |
 
-Using something not listed here? It will very likely still work — please let us know how it goes (see [Giving feedback](#giving-feedback)) so we can grow this list.
+Not sure which you have? With mobile data/Wi-Fi on but **Bluetooth off**, and away from the gate, try opening it in the official app — if it still works it's a Wi-Fi/cellular unit and should work here too. Using something not listed? It will very likely still work — please let us know how it goes (see [Giving feedback](#giving-feedback)) so we can grow this list.
 
 ---
 
