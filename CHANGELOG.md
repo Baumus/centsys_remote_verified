@@ -1,3 +1,12 @@
+## 0.6.3b5 — startup diagnostics (2026-10-15 pre-release)
+
+Diagnostic-only preview: the stationary-startup issue remains unresolved.
+- Record bounded metadata for handshake replies, identity replies, overview decoding and timeout stage.
+- Distinguish retained/rejected telemetry from missing messages; log counts, lengths and anonymous session slots, never raw payloads or device identifiers in the new diagnostics.
+- Remove the speculative “gate asleep?” explanation from the overview timeout warning.
+- Motor packet behavior, position freshness rules and command safety guards are unchanged.
+- Offline verification does not establish hardware recovery.
+
 ## 0.6.3b4 (2026-10-15, unpublished pre-release candidate)
 
 - Request initial SMART position after subscription, and wait for the operator's connection response before sending the cmd 01 identity/status request. No remote movement should be needed to bootstrap telemetry when the device responds.

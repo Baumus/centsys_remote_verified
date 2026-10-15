@@ -455,3 +455,41 @@ def test_bootstrap_never_echoes_activation_challenge(monkeypatch):
         ("S/userRemoteTrigger", b"identity-only"),
         ("S/disconnect", b""),
     ]
+
+
+# Diagnostic evidence must distinguish missing handshake, rejected cached data,
+# and decoded frames with no position, without exposing identifiers or contents.
+def test_startup_diagnostics_missing_handshake(monkeypatch, caplog):
+    caplog.set_level("DEBUG", logger=mqtt_remote.__name__)
+    _bootstrap(monkeypatch, statuses={"S": None})
+    assert "stage=handshake counts={}" in caplog.text
+    assert "sending identity only" not in caplog.text
+
+
+def test_startup_diagnostics_retained_frame(monkeypatch, caplog):
+    caplog.set_level("DEBUG", logger=mqtt_remote.__name__)
+    _bootstrap(monkeypatch, retained=True, stop_at=16)
+    assert "kind=identity_reply" in caplog.text
+    assert "retained=True decoded=False position_known=False" in caplog.text
+    assert "stage=position" in caplog.text
+    assert "S/" not in caplog.text
+    assert "challenge" not in caplog.text
+
+
+def test_startup_diagnostics_unknown_position(monkeypatch, caplog):
+    caplog.set_level("DEBUG", logger=mqtt_remote.__name__)
+    _bootstrap(monkeypatch, statuses={"S": 255}, stop_at=16)
+    assert "decoded=True position_known=False" in caplog.text
+    assert "stage=position" in caplog.text
+
+
+def test_startup_diagnostics_are_bounded_and_metadata_only(caplog):
+    caplog.set_level("DEBUG", logger=mqtt_remote.__name__)
+    diagnostics = mqtt_remote._StartupDiagnostics("listener-slot-1")
+    msg = types.SimpleNamespace(topic="PRIVATE_DEVICE/overview", payload=b"PRIVATE_TOKEN",
+                                retain=False, properties={"secret": "PRIVATE_SECRET"})
+    for _ in range(100):
+        diagnostics.record("overview", msg, decoded=False)
+    assert diagnostics.counts == {"overview": 100}
+    assert len(caplog.records) == 3
+    assert "PRIVATE" not in caplog.text

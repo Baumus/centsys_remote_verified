@@ -546,6 +546,27 @@ def parse_device_overview(
     )
 
 
+class _StartupDiagnostics:
+    """Bounded, metadata-only evidence; never log topics, IDs or wire contents."""
+
+    def __init__(self, context: str):
+        self.context = context
+        self.counts: dict[str, int] = {}
+
+    def record(
+        self, kind: str, msg, *, decoded: bool | None = None,
+        position_known: bool | None = None,
+    ) -> None:
+        count = self.counts.get(kind, 0) + 1
+        self.counts[kind] = count
+        if count <= 3:
+            _LOGGER.debug(
+                "MQTT startup %s: kind=%s count=%d bytes=%d retained=%s decoded=%s position_known=%s",
+                self.context, kind, count, len(msg.payload or b""),
+                bool(getattr(msg, "retain", False)), decoded, position_known,
+            )
+
+
 def overview_from_message(msg, *, strict: bool = False) -> DeviceOverview | None:
     """Decode a deviceOverview MQTT message into telemetry, or None if unusable.
 
@@ -923,6 +944,7 @@ def fetch_overview_blocking(
     conn_resp = threading.Event()
     got_overview = threading.Event()
     holder: dict[str, DeviceOverview] = {}
+    diagnostics = _StartupDiagnostics("fetch")
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         client.subscribe([(t_req_resp, 0), (t_trig_resp, 0), (t_overview, 0), (t_sysurc, 0)])
@@ -932,9 +954,17 @@ def fetch_overview_blocking(
 
     def on_message(client, userdata, msg):
         if msg.topic == t_req_resp:
+            diagnostics.record("handshake", msg)
             conn_resp.set()
+        elif msg.topic == t_trig_resp:
+            diagnostics.record("identity_reply", msg)
         elif msg.topic in (t_overview, t_sysurc) and msg.payload:
             ov = overview_from_message(msg, strict=msg.topic == t_sysurc)
+            diagnostics.record(
+                "overview" if msg.topic == t_overview else "secondary",
+                msg, decoded=ov is not None,
+                position_known=ov is not None and ov.gate_status is not None,
+            )
             if ov is None:
                 return
             holder["overview"] = ov
@@ -971,7 +1001,8 @@ def fetch_overview_blocking(
             client.publish(t_trig, wake_cmd01, qos=0, properties=props())
 
         if not got_overview.wait(timeout):
-            _LOGGER.warning("MQTT overview: no deviceOverview received (gate asleep?)")
+            _LOGGER.warning("MQTT overview: no usable telemetry received; cause undetermined")
+            _LOGGER.debug("MQTT startup fetch: timeout counts=%s", diagnostics.counts)
             return None
         return holder.get("overview")
 
@@ -1025,6 +1056,9 @@ def listen_overview_blocking(
     measured = {s: threading.Event() for s in wake_serials}
     wake_state: dict[str, tuple[int, float, bool]] = {}
     serial_by_response = {f"{s}/connectionRequestResponse": s for s in wake_serials}
+    serial_by_trigger = {f"{s}/userRemoteTriggerResponse": s for s in wake_serials}
+    diagnostics = {s: _StartupDiagnostics(f"listener-slot-{i}")
+                   for i, s in enumerate(serials, 1)}
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         subs: list[tuple[str, int]] = []
@@ -1055,8 +1089,13 @@ def listen_overview_blocking(
     def on_message(client, userdata, msg):
         response_serial = serial_by_response.get(msg.topic)
         if response_serial is not None:
+            diagnostics[response_serial].record("handshake", msg)
             if not getattr(msg, "retain", False):
                 acknowledged[response_serial].set()
+            return
+        trigger_serial = serial_by_trigger.get(msg.topic)
+        if trigger_serial is not None:
+            diagnostics[trigger_serial].record("identity_reply", msg)
             return
         serial = serial_by_overview.get(msg.topic)
         strict = False
@@ -1066,6 +1105,10 @@ def listen_overview_blocking(
         if serial is None or not msg.payload:
             return
         ov = overview_from_message(msg, strict=strict)
+        diagnostics[serial].record(
+            "secondary" if strict else "overview", msg, decoded=ov is not None,
+            position_known=ov is not None and ov.gate_status is not None,
+        )
         if ov is None:
             return
         if serial in measured and ov.gate_status in {
@@ -1084,6 +1127,8 @@ def listen_overview_blocking(
         return p
 
     def request_status(client, serial: str, attempt: int) -> None:
+        _LOGGER.debug("MQTT startup %s: connection request attempt=%d",
+                      diagnostics[serial].context, attempt)
         acknowledged[serial].clear()
         wake_state[serial] = (attempt, time.monotonic() + connect_timeout, False)
         client.publish(f"{serial}/connectionRequest", b"", qos=2, properties=props(serial))
@@ -1106,11 +1151,19 @@ def listen_overview_blocking(
                 # cmd 01 requests identity/telemetry only. Never send cmd 03
                 # (activation), even when the device returns a challenge.
                 wake_state[serial] = (attempt, time.monotonic() + connect_timeout, True)
+                _LOGGER.debug("MQTT startup %s: acknowledged; sending identity only",
+                              diagnostics[serial].context)
                 client.publish(
                     f"{serial}/userRemoteTrigger", wakes[serial], qos=0,
                     properties=props(serial),
                 )
             elif time.monotonic() >= deadline:
+                _LOGGER.debug(
+                    "MQTT startup %s: timeout attempt=%d stage=%s counts=%s",
+                    diagnostics[serial].context, attempt,
+                    "position" if identity_sent else "handshake",
+                    diagnostics[serial].counts,
+                )
                 if attempt < 3:
                     request_status(client, serial, attempt + 1)
                 else:
@@ -1144,6 +1197,8 @@ def listen_overview_blocking(
                 on_connected()
             except Exception:  # noqa: BLE001 - never let a callback kill the loop
                 _LOGGER.debug("listen on_connected callback raised", exc_info=True)
+        _LOGGER.debug("MQTT startup listener: subscribed operators=%d wake_targets=%d",
+                      len(serials), len(wake_serials))
         if wakes:
             send_wakes(client)
             advance_wakes(client)
