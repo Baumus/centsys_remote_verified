@@ -1,4 +1,4 @@
-## 0.6.3b5 — startup diagnostics (local candidate)
+## 0.6.3b5 — startup diagnostics (2026-10-15 pre-release)
 
 Diagnostic-only preview: the stationary-startup issue remains unresolved.
 - Record bounded metadata for handshake replies, identity replies, overview decoding and timeout stage.
