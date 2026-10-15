@@ -1,5 +1,5 @@
 {
-  "name": "Centsys Remote Verified State (Preview)",
+  "name": "Centsys Remote Verified State",
   "homeassistant": "2024.4.0",
   "render_readme": true
 }

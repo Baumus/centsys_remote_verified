@@ -1,3 +1,17 @@
+# Changelog
+
+## 0.6.3 — verified position and stationary startup (2026-10-15)
+
+Regular fork release incorporating b2–b5 and dependency PR #2.
+- SMART display and command preflight use TTL-bounded non-retained MQTT position, never HTTP/restored position fallback.
+- Clear trust on listener loss/expiry; recheck and consume the endpoint before a directionless trigger. Already-at-target is a no-op; no motor-command retry.
+- Wait for acknowledgement before startup/reconnect identity/status requests, with bounded independent retries. Correct initial stationary freshness lifetime.
+- Include bounded startup diagnostic metadata without raw payloads or device identifiers in the new messages.
+- One owner reports stationary acquisition and operation without remote/app priming, including after a subsequent restart. Earlier b4 failed on the same installation; the reason later starts succeeded is not established. Wider hardware/network validation remains open.
+- Update offline pytest to 9.0.3; runtime dependencies unchanged.
+
+Historical entries below retain their original validation status.
+
 ## 0.6.3b5 — startup diagnostics (2026-10-15 pre-release)
 
 Diagnostic-only preview: the stationary-startup issue remains unresolved.
@@ -22,10 +36,6 @@ Diagnostic-only preview: the stationary-startup issue remains unresolved.
 - Activation packet builders and listener/parser behavior are unchanged.
 - 124 offline source-level tests passed. Full HA startup, HACS/hassfest CI and hardware command acceptance remain pending.
 - TRG is still a directionless trigger, not an absolute directional API. External controls can race the final check. A sent command is never automatically retried.
-
-# Changelog
-
-Notable changes to the Centsys Gate Remote integration.
 
 ## 0.6.3b1 (2026-10-08) — Find gates linked by admin as well as remote user (beta)
 

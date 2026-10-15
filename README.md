@@ -1,9 +1,8 @@
-# Verified-state release candidate — 0.6.3b4
+# Verified-state fork — 0.6.3
 
-Experimental fork of [Lex Campbell's Centsys Remote](https://github.com/Lex-campbell/centsys_remote), based on commit `7c05bec3b83a296cd0dce5548cc2fef6d08b1f77`.
-MIT attribution is preserved. Not an upstream release. Read [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md) before installing. No claim of hardware validation or official HACS-list inclusion.
+Community fork of [Lex Campbell's Centsys Remote](https://github.com/Lex-campbell/centsys_remote). MIT attribution is preserved. Regular release of this fork, not an upstream release or official HACS-list inclusion. Read [release and upgrade notes](RELEASE_CANDIDATE.md). Never install both repositories for the same domain.
 
-This candidate adds acknowledged, bounded read-only status bootstrap after startup/reconnect, and fixes initial stationary-position freshness. Offline regressions pass; a real HA restart with an idle operator remains to be validated. Do not install both repositories for the same `centsys_remote` domain.
+Uses fresh non-retained MQTT position and acknowledged, bounded stationary startup requests without movement. One installation reports successful stationary startup and operation, including after restart; wider device/network validation remains open.
 
 ---
 
@@ -95,8 +94,8 @@ There are no extra Python packages to install by hand — Home Assistant install
 ### HACS (custom repository)
 
 1. In HACS, open the **⋮** menu → **Custom repositories**.
-2. Add `https://github.com/Baumus/centsys_remote_verified` with category **Integration**. This preview replaces the upstream provider for the same domain; never install both.
-3. Select **Centsys Remote Verified State (Preview)**, enable pre-release versions and explicitly download **0.6.3b4**. Follow the backup/source-switch instructions in [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md), then restart Home Assistant in a safe maintenance window. Do not delete the existing integration entry.
+2. Add `https://github.com/Baumus/centsys_remote_verified` with category **Integration**. This fork replaces the upstream provider for the same domain; never install both.
+3. Select **Centsys Remote Verified State** and download regular release **0.6.3**. Follow the backup/source-switch instructions in [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md), then restart Home Assistant in a safe maintenance window. Do not delete the existing integration entry.
 
 ### Manual (without HACS)
 
