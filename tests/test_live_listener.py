@@ -83,7 +83,7 @@ def _fake_session_factory(published: list, *, deliver=None, auto_stop: threading
         client = _Client()
         on_connect(client, None, None, None)
         if on_subscribe is not None:
-            on_subscribe(client, None, None, None)
+            on_subscribe(client, None, None, [0])
         if deliver is not None:
             topic, payload = deliver
             msg = types.SimpleNamespace(
@@ -257,6 +257,9 @@ class _FakeCoord:
     def async_update_listeners(self):
         self.updates += 1
 
+    def invalidate_wifi_positions(self):
+        self.invalidated = True
+
     def _thread_safe_ingest(self, serial, overview):
         self.ingested.append((serial, overview))
 
@@ -300,9 +303,40 @@ def test_supervisor_reconnects_with_backoff_and_survives_cert_expiry():
     assert len(calls) == 3  # cert-expiry did not abort the supervisor
     assert calls[0]["serials"] == ["S1"]
     assert calls[0]["macs"] == {"S1": "AA:BB:CC:DD"}
-    assert calls[0]["wake_interval"] == float(const.TELEMETRY_SCAN_INTERVAL)
+    assert calls[0]["wake_interval"] == float(const.POSITION_IDLE_REFRESH_INTERVAL)
     # Backoff grows on repeated fast drops: MIN, then MIN*2 (two gaps, three tries).
     assert sleeps == [const.LISTENER_RECONNECT_MIN, const.LISTENER_RECONNECT_MIN * 2]
     # A connection reported connected at least once, toggling the active flag.
     assert coord.updates >= 1
     assert listener.active is False  # cleared after the final drop/stop
+
+
+def test_retained_position_is_not_a_fresh_measurement():
+    msg = types.SimpleNamespace(
+        payload=_v2_frame(1), retain=True,
+        properties=types.SimpleNamespace(UserProperty=[]),
+    )
+    assert mqtt_remote.overview_from_message(msg) is None
+
+
+def test_disconnect_clears_verified_positions():
+    coord = _FakeCoord(_FakeClient([]), {})
+    listener = live_listener.LiveListener(coord)
+    listener._set_connected(True)
+    listener._set_connected(False)
+    assert coord.invalidated is True
+
+
+def test_listener_rejects_failed_subscription(monkeypatch):
+    @contextmanager
+    def rejected(*, on_subscribe, **kwargs):
+        on_subscribe(None, None, 1, [128])
+        yield object()
+    monkeypatch.setattr(mqtt_remote, 'operator_session', rejected)
+    connected = []
+    assert mqtt_remote.listen_overview_blocking(
+        host='h', port=1, client_id='test', serials=['S'],
+        cert_pem=b'c', key_pem=b'k', on_overview=lambda *a: None,
+        stop_event=threading.Event(), on_connected=lambda: connected.append(True),
+    ) == 'dropped'
+    assert not connected

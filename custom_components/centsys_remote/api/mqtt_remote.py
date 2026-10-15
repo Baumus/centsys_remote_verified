@@ -554,6 +554,9 @@ def overview_from_message(msg, *, strict: bool = False) -> DeviceOverview | None
     length isn't a telemetry frame -- callers on a multiplexed topic pass
     ``strict=True`` so non-telemetry messages are dropped rather than force-fit.
     """
+    # Retained MQTT frames predate this subscription: arrival is not freshness.
+    if getattr(msg, "retain", False):
+        return None
     code = reported_product_code(msg.properties)
     try:
         return parse_device_overview(msg.payload, reported_code=code, strict=strict)
@@ -1028,6 +1031,13 @@ def listen_overview_blocking(
             client.subscribe(subs)
 
     def on_subscribe(client, userdata, mid, reason_codes, properties=None):
+        if not reason_codes or any(
+            int(getattr(code, "value", code)) >= 128 for code in reason_codes
+        ):
+            _LOGGER.warning("MQTT listener subscription rejected; live status untrusted")
+            dropped.set()
+            subscribed.set()
+            return
         subscribed.set()
 
     def on_disconnect(client, userdata, *args):
@@ -1081,6 +1091,8 @@ def listen_overview_blocking(
     ) as client:
         if not subscribed.wait(connect_timeout):
             _LOGGER.debug("MQTT listen: subscriptions never confirmed")
+            return "dropped"
+        if dropped.is_set():
             return "dropped"
         if on_connected is not None:
             try:

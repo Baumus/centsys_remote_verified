@@ -1,3 +1,12 @@
+# Verified-state release candidate — 0.6.3b2
+
+Experimental fork of [Lex Campbell's Centsys Remote](https://github.com/Lex-campbell/centsys_remote), based on commit `7c05bec3b83a296cd0dce5548cc2fef6d08b1f77`.
+MIT attribution is preserved. Not an upstream release. Read [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md) before installing. No claim of hardware validation or official HACS-list inclusion.
+
+This candidate changes SMART position authority and open/close preflight behavior. It does **not** establish the cause of a missing MQTT stream. Do not install both repositories for the same `centsys_remote` domain.
+
+---
+
 # Centsys Gate Remote for Home Assistant
 
 Control and monitor your Centurion gate operator directly from Home Assistant — open and close the gate, see live open/closed status, and track battery, mains power, safety beams and more. Works with **SMART Wi-Fi operators** (e.g. **D5-Evo SMART+**) and, experimentally, older **GSM/ULTRA** operators reached through a cellular module (see [Supported devices](#supported-devices)).

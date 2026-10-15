@@ -1,14 +1,9 @@
-"""Cover entity representing the gate's open/closed state.
+"""SMART cover using verified MQTT position, never unverified HTTP fallback.
 
-State comes from ``GetOperatorOverview`` (``operatorStatus``) for steady state,
-and from the live MQTT ``deviceOverview`` stream while the gate is moving (see
-``CentsysCoordinator.start_live_follow``). The operator is a single-button trigger, so both open
-and close pulse the same MQTT trigger (the gate decides direction from its own
-state) -- exactly how the physical remote and the app's button behave.
-
-We deliberately do NOT use ``assumed_state`` here: with the live follow keeping
-the reported state accurate, HA's default greying (open disabled when open,
-close disabled when closed) correctly reflects the real gate position.
+Both actions use the same operator trigger. A fresh stationary endpoint is
+required before a direction is interpreted; an already-reached target is a no-op.
+External remote/app operation can still race the preflight: TRG is not an
+absolute directional command. No command packet/activation code is changed.
 """
 
 from __future__ import annotations
@@ -79,6 +74,7 @@ class CentsysGateCover(CentsysEntity, CoverEntity):
     def __init__(self, coordinator: CentsysCoordinator, serial: str) -> None:
         super().__init__(coordinator, serial)
         self._attr_unique_id = f"{serial}_gate"
+        self._command_lock = asyncio.Lock()
 
     @property
     def _status(self):
@@ -93,26 +89,31 @@ class CentsysGateCover(CentsysEntity, CoverEntity):
     @property
     def is_closed(self) -> bool | None:
         live = self._live
-        if live is not None:
-            return live == "closed"
-        status = self._status
-        return status.is_closed if status else None
+        return None if live is None else live == "closed"
 
     @property
     def is_opening(self) -> bool:
-        live = self._live
-        if live is not None:
-            return live == "opening"
-        status = self._status
-        return bool(status and status.is_opening)
+        return self._live == "opening"
 
     @property
     def is_closing(self) -> bool:
-        live = self._live
-        if live is not None:
-            return live == "closing"
-        status = self._status
-        return bool(status and status.is_closing)
+        return self._live == "closing"
+
+    async def _move_to(self, target: str) -> None:
+        """TRG is a toggle: require a fresh endpoint before interpreting direction."""
+        device = (self._device_data or {}).get("device")
+        mac = getattr(device, "mac_address", None)
+        if not mac:
+            raise HomeAssistantError("No device MAC; cannot verify window position.")
+        overview = await self._read_overview(mac, cached=False)
+        label = getattr(overview, "gate_status", None)
+        if label not in {"open", "closed"}:
+            raise HomeAssistantError(
+                "No verified stationary endpoint; refusing the directionless trigger."
+            )
+        if label == target:
+            return
+        await self._trigger()
 
     async def _trigger(self) -> None:
         data = self._device_data or {}
@@ -145,10 +146,12 @@ class CentsysGateCover(CentsysEntity, CoverEntity):
         self.coordinator.note_activation(self._serial)
 
     async def async_open_cover(self, **kwargs) -> None:
-        await self._trigger()
+        async with self._command_lock:
+            await self._move_to("open")
 
     async def async_close_cover(self, **kwargs) -> None:
-        await self._trigger()
+        async with self._command_lock:
+            await self._move_to("closed")
 
 
 class CentsysSharedGateCover(CentsysSharedEntity, CoverEntity):
