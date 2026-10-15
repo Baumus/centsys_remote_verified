@@ -999,8 +999,10 @@ def listen_overview_blocking(
     broadcasts during activity, invoking ``on_overview(serial, DeviceOverview)``
     for every frame. When ``wakes`` (a ``{serial: cmd01}`` mapping) and
     ``wake_interval`` are given it also publishes a per-serial connectionRequest
-    plus cmd 01 on connect and every ``wake_interval`` seconds, to pull idle
-    telemetry (battery/beams) too -- this does NOT open the gate.
+    then, only after its acknowledgement, cmd 01 on connect and every
+    ``wake_interval`` seconds, to pull idle telemetry (battery/beams) too.
+    This does NOT open the gate. Missing replies get at most three attempts
+    per refresh cycle, never an activation or an unbounded startup loop.
 
     Runs until ``stop_event`` is set (returns ``"stopped"``) or the broker
     connection drops (returns ``"dropped"``), so a supervisor can reconnect with
@@ -1016,6 +1018,13 @@ def listen_overview_blocking(
 
     subscribed = threading.Event()
     dropped = threading.Event()
+    # Network callbacks only signal events; the owner thread drives each
+    # operator independently so a silent device cannot delay another one.
+    wake_serials = [s for s in serials if wakes.get(s)]
+    acknowledged = {s: threading.Event() for s in wake_serials}
+    measured = {s: threading.Event() for s in wake_serials}
+    wake_state: dict[str, tuple[int, float, bool]] = {}
+    serial_by_response = {f"{s}/connectionRequestResponse": s for s in wake_serials}
 
     def on_connect(client, userdata, flags, reason_code, properties=None):
         subs: list[tuple[str, int]] = []
@@ -1044,6 +1053,11 @@ def listen_overview_blocking(
         dropped.set()
 
     def on_message(client, userdata, msg):
+        response_serial = serial_by_response.get(msg.topic)
+        if response_serial is not None:
+            if not getattr(msg, "retain", False):
+                acknowledged[response_serial].set()
+            return
         serial = serial_by_overview.get(msg.topic)
         strict = False
         if serial is None:
@@ -1054,6 +1068,10 @@ def listen_overview_blocking(
         ov = overview_from_message(msg, strict=strict)
         if ov is None:
             return
+        if serial in measured and ov.gate_status in {
+            "open", "closed", "partly_open", "partly_closed", "opening", "closing"
+        }:
+            measured[serial].set()
         try:
             on_overview(serial, ov)
         except Exception:  # noqa: BLE001 - never let a callback kill the loop
@@ -1065,17 +1083,44 @@ def listen_overview_blocking(
         p.UserProperty = [("ClientId", client_id)]
         return p
 
+    def request_status(client, serial: str, attempt: int) -> None:
+        acknowledged[serial].clear()
+        wake_state[serial] = (attempt, time.monotonic() + connect_timeout, False)
+        client.publish(f"{serial}/connectionRequest", b"", qos=2, properties=props(serial))
+
     def send_wakes(client) -> None:
-        for s in serials:
-            client.publish(f"{s}/connectionRequest", b"", qos=2, properties=props(s))
-            cmd01 = wakes.get(s)
-            if cmd01:
-                client.publish(f"{s}/userRemoteTrigger", cmd01, qos=0, properties=props(s))
+        for serial in wake_serials:
+            if stop_event.is_set() or dropped.is_set():
+                break
+            measured[serial].clear()
+            request_status(client, serial, 1)
+
+    def advance_wakes(client) -> None:
+        for serial, (attempt, deadline, identity_sent) in list(wake_state.items()):
+            if stop_event.is_set() or dropped.is_set():
+                return
+            if measured[serial].is_set():
+                del wake_state[serial]
+                continue
+            if not identity_sent and acknowledged[serial].is_set():
+                # cmd 01 requests identity/telemetry only. Never send cmd 03
+                # (activation), even when the device returns a challenge.
+                wake_state[serial] = (attempt, time.monotonic() + connect_timeout, True)
+                client.publish(
+                    f"{serial}/userRemoteTrigger", wakes[serial], qos=0,
+                    properties=props(serial),
+                )
+            elif time.monotonic() >= deadline:
+                if attempt < 3:
+                    request_status(client, serial, attempt + 1)
+                else:
+                    del wake_state[serial]
+                    _LOGGER.debug("MQTT listener: initial status unavailable after three attempts")
 
     def on_close(client) -> None:
-        # Only release operators we actually connected to (wake path).
-        for s in serials:
-            client.publish(f"{s}/disconnect", b"", qos=0, properties=props(s))
+        # Only release operators for which we have a valid identity packet.
+        for serial in wake_serials:
+            client.publish(f"{serial}/disconnect", b"", qos=0, properties=props(serial))
 
     with operator_session(
         host=host,
@@ -1101,6 +1146,7 @@ def listen_overview_blocking(
                 _LOGGER.debug("listen on_connected callback raised", exc_info=True)
         if wakes:
             send_wakes(client)
+            advance_wakes(client)
         do_wake = bool(wakes and wake_interval)
         next_wake = time.monotonic() + wake_interval if do_wake else None
         while not stop_event.is_set() and not dropped.is_set():
@@ -1108,6 +1154,7 @@ def listen_overview_blocking(
                 break
             if dropped.is_set():
                 break
+            advance_wakes(client)
             if next_wake is not None and time.monotonic() >= next_wake:
                 send_wakes(client)
                 next_wake = time.monotonic() + wake_interval

@@ -1,9 +1,9 @@
-# Verified-state release candidate — 0.6.3b2
+# Verified-state release candidate — 0.6.3b4
 
 Experimental fork of [Lex Campbell's Centsys Remote](https://github.com/Lex-campbell/centsys_remote), based on commit `7c05bec3b83a296cd0dce5548cc2fef6d08b1f77`.
 MIT attribution is preserved. Not an upstream release. Read [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md) before installing. No claim of hardware validation or official HACS-list inclusion.
 
-This candidate changes SMART position authority and open/close preflight behavior. It does **not** establish the cause of a missing MQTT stream. Do not install both repositories for the same `centsys_remote` domain.
+This candidate adds acknowledged, bounded read-only status bootstrap after startup/reconnect, and fixes initial stationary-position freshness. Offline regressions pass; a real HA restart with an idle operator remains to be validated. Do not install both repositories for the same `centsys_remote` domain.
 
 ---
 

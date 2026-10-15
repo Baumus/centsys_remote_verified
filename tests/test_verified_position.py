@@ -295,3 +295,17 @@ def test_ack_failure_does_not_restore_old_endpoint(rig):
     with pytest.raises(RuntimeError, match='acknowledge'):
         asyncio.run(cover.async_open_cover())
     assert cover._live is None
+
+
+@pytest.mark.parametrize("label,closed", [("closed", True), ("open", False)])
+def test_first_refresh_position_uses_stationary_ttl_before_data_exists(rig, label, closed):
+    c, cover, clock, _, _ = rig
+    c.data = None
+    c.ingest_overview("S", SimpleNamespace(gate_status=label), live=False, notify=False)
+    # HA has not assigned the initial coordinator result until all discovery
+    # calls finish; no movement or fresh frame is needed when it finally does.
+    clock[0] += 25
+    c.data = {"S": {"kind": "wifi", "device": SimpleNamespace(is_online=True)}}
+    assert cover.is_closed is closed
+    clock[0] += 65
+    assert cover.is_closed is None

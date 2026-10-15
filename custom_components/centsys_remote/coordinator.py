@@ -181,7 +181,9 @@ class CentsysCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         }:
             self._live_status.pop(key, None)
         else:
-            wifi = ((self.data or {}).get(key) or {}).get("kind") == "wifi"
+            # First refresh ingests Wi-Fi telemetry before self.data exists.
+            kind = ((self.data or {}).get(key) or {}).get("kind")
+            wifi = kind == "wifi" or (kind is None and key in self._overview)
             stationary = label in {"open", "closed", "partly_open", "partly_closed"}
             ttl = STATIONARY_POSITION_TTL if wifi and stationary else LIVE_STATUS_TTL
             self._live_status[key] = (label, time.monotonic() + ttl)

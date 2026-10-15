@@ -1,3 +1,10 @@
+## 0.6.3b4 (2026-10-15, unpublished pre-release candidate)
+
+- Request initial SMART position after subscription, and wait for the operator's connection response before sending the cmd 01 identity/status request. No remote movement should be needed to bootstrap telemetry when the device responds.
+- Retry missing acknowledgement/status up to three times per refresh cycle, independently per device; reject retained replies. No activation/challenge echo or automatic motor-command retry.
+- Use stationary-position freshness during the first coordinator refresh, even before the initial device data map is assigned. Unknown/offline/stale states still fail closed.
+- 136 offline tests pass; twelve targeted regressions fail against published b3 and pass with this fix. Real HA startup/hardware and post-publication CI remain unverified.
+
 ## 0.6.3b3 (2026-10-15, pre-release)
 
 - SMART cover actions now use the same TTL-bounded verified telemetry as the displayed state, instead of requiring an independent one-shot MQTT overview read.
