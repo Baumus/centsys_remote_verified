@@ -95,8 +95,8 @@ There are no extra Python packages to install by hand — Home Assistant install
 ### HACS (custom repository)
 
 1. In HACS, open the **⋮** menu → **Custom repositories**.
-2. Add `https://github.com/lex-campbell/centsys_remote` with category **Integration**.
-3. Find **Centsys Gate Remote** in HACS, **Download** it, then **restart Home Assistant**.
+2. Add `https://github.com/Baumus/centsys_remote_verified` with category **Integration**. This preview replaces the upstream provider for the same domain; never install both.
+3. Select **Centsys Remote Verified State (Preview)**, enable pre-release versions and explicitly download **0.6.3b2**. Follow the backup/source-switch instructions in [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md), then restart Home Assistant in a safe maintenance window. Do not delete the existing integration entry.
 
 ### Manual (without HACS)
 
