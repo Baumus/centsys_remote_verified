@@ -1,3 +1,12 @@
+## 0.6.3b3 (2026-10-15, pre-release)
+
+- SMART cover actions now use the same TTL-bounded verified telemetry as the displayed state, instead of requiring an independent one-shot MQTT overview read.
+- Refuse immediately when verified position is absent, expired, moving, intermediate or cloud-offline. Already-at-target actions remain no-ops.
+- Recheck after asynchronous family resolution and consume the endpoint before sending, preventing queued HA actions from reusing pre-command position.
+- Activation packet builders and listener/parser behavior are unchanged.
+- 124 offline source-level tests passed. Full HA startup, HACS/hassfest CI and hardware command acceptance remain pending.
+- TRG is still a directionless trigger, not an absolute directional API. External controls can race the final check. A sent command is never automatically retried.
+
 # Changelog
 
 Notable changes to the Centsys Gate Remote integration.

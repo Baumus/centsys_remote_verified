@@ -29,8 +29,8 @@ Coordinator = load_methods('coordinator.py', 'CentsysCoordinator', {
     'set_live_gate_status', 'live_gate_status', '_live_status_label', 'ingest_overview', 'invalidate_wifi_positions'
 })
 Cover = load_methods('cover.py', 'CentsysGateCover', {
-    '_live', 'is_closed', 'is_opening', 'is_closing', '_move_to', 'async_open_cover', 'async_close_cover'
-})
+    '_live', 'is_closed', 'is_opening', 'is_closing', '_move_to', '_trigger', 'async_open_cover', 'async_close_cover'
+}, CentsysCertExpiredError=type('CertError', (Exception,), {}), CentsysError=type('ApiError', (Exception,), {}))
 Sensor = load_methods('sensor.py', 'CentsysSensor', {'native_value'})
 Binary = load_methods('binary_sensor.py', 'CentsysBinarySensor', {'is_on'})
 
@@ -111,25 +111,30 @@ def test_verified_connection_is_not_cloud_online(rig):
     assert b.is_on is False
 
 
-@pytest.mark.parametrize('label', [None, 'unknown', 'lost', 'opening', 'closing', 'partly_open'])
-def test_directionless_command_refused_without_stationary_endpoint(label):
-    cover = Cover(); cover._device_data = {'device': SimpleNamespace(mac_address='test')}
+@pytest.mark.parametrize('label', [None, 'unknown', 'lost', 'opening', 'closing', 'partly_open', 'partly_closed'])
+def test_directionless_command_refused_without_stationary_endpoint(rig, label):
+    c, cover, *_ = rig
+    cover._device_data = {'device': SimpleNamespace(mac_address='test')}
+    c.set_live_gate_status('S', label)
     triggers = []
     async def read(*a, **kw):
-        assert kw == {'cached': False}
-        return SimpleNamespace(gate_status=label)
-    async def trigger(): triggers.append(True)
+        pytest.fail('A command must not start an independent telemetry session')
+    async def trigger(**kw): triggers.append(True)
     cover._read_overview = read; cover._trigger = trigger
     with pytest.raises(RuntimeError): asyncio.run(cover._move_to('open'))
     assert triggers == []
 
 
 @pytest.mark.parametrize('target,label,count', [('open','open',0), ('closed','closed',0), ('open','closed',1), ('closed','open',1)])
-def test_directional_actions_are_idempotent(target, label, count):
-    cover = Cover(); cover._device_data = {'device': SimpleNamespace(mac_address='test')}
+def test_directional_actions_are_idempotent(rig, target, label, count):
+    c, cover, *_ = rig
+    cover._device_data = {'device': SimpleNamespace(mac_address='test')}
+    c.set_live_gate_status('S', label)
     triggers = []
-    async def read(*a, **kw): return SimpleNamespace(gate_status=label)
-    async def trigger(): triggers.append(True)
+    async def read(*a, **kw): pytest.fail('Unexpected independent telemetry read')
+    async def trigger(**kw):
+        assert kw == {'expected_endpoint': label}
+        triggers.append(True)
     cover._read_overview = read; cover._trigger = trigger
     asyncio.run(cover._move_to(target))
     assert len(triggers) == count
@@ -195,3 +200,98 @@ def test_concurrent_calls_are_serialized(rig):
         await asyncio.gather(cover.async_open_cover(), cover.async_close_cover())
     asyncio.run(run())
     assert maximum == 1
+
+
+def prepare_command(rig):
+    c, cover, clock, *_ = rig
+    cover._device_data = {'device': SimpleNamespace(mac_address='test')}
+    cover._command_lock = asyncio.Lock()
+    calls = []
+    async def family(mac): return 'gate'
+    async def activate(*args, **kwargs):
+        calls.append(kwargs)
+        return True
+    async def refresh(): pass
+    cover._resolve_family = family
+    c.client = SimpleNamespace(open_gate=activate)
+    c.async_request_refresh = refresh
+    c.note_activation = lambda *args: None
+    return c, cover, clock, calls
+
+
+def test_live_endpoint_commands_without_one_shot_mqtt(rig):
+    c, cover, _, calls = prepare_command(rig)
+    async def forbidden(*args, **kwargs):
+        pytest.fail('The working listener must not be bypassed by a second read')
+    cover._read_overview = forbidden
+    c.set_live_gate_status('S', 'closed')
+    asyncio.run(cover.async_open_cover())
+    assert len(calls) == 1
+    assert calls[0]['is_garage'] is False
+    assert cover._live is None  # consumed until another real frame arrives
+
+
+def test_expired_endpoint_cannot_use_raw_cached_overview(rig):
+    c, cover, clock, calls = prepare_command(rig)
+    c.set_live_gate_status('S', 'closed')
+    c.data['S']['overview'] = SimpleNamespace(gate_status='closed')
+    clock[0] += 91
+    with pytest.raises(RuntimeError, match='No fresh stationary endpoint'):
+        asyncio.run(cover.async_open_cover())
+    assert not calls
+
+
+@pytest.mark.parametrize('new_state', [None, 'opening', 'open', 'partly_open'])
+def test_position_rechecked_after_family_await(rig, new_state):
+    c, cover, _, calls = prepare_command(rig)
+    c.set_live_gate_status('S', 'closed')
+    async def family(mac):
+        await asyncio.sleep(0)
+        c.set_live_gate_status('S', new_state)
+        return 'gate'
+    cover._resolve_family = family
+    with pytest.raises(RuntimeError, match='changed or expired'):
+        asyncio.run(cover.async_open_cover())
+    assert not calls
+
+
+def test_expiry_during_family_lookup_prevents_trigger(rig):
+    c, cover, clock, calls = prepare_command(rig)
+    c.set_live_gate_status('S', 'closed')
+    async def family(mac):
+        clock[0] += 91
+        return 'gate'
+    cover._resolve_family = family
+    with pytest.raises(RuntimeError, match='changed or expired'):
+        asyncio.run(cover.async_open_cover())
+    assert not calls
+
+
+def test_queued_commands_cannot_reuse_consumed_endpoint(rig):
+    c, cover, _, calls = prepare_command(rig)
+    c.set_live_gate_status('S', 'closed')
+    async def run():
+        return await asyncio.gather(cover.async_open_cover(), cover.async_close_cover(), return_exceptions=True)
+    outcomes = asyncio.run(run())
+    assert outcomes[0] is None
+    assert isinstance(outcomes[1], RuntimeError)
+    assert len(calls) == 1
+
+
+def test_new_verified_endpoint_allows_next_command(rig):
+    c, cover, _, calls = prepare_command(rig)
+    c.set_live_gate_status('S', 'closed')
+    asyncio.run(cover.async_open_cover())
+    c.set_live_gate_status('S', 'open')
+    asyncio.run(cover.async_close_cover())
+    assert len(calls) == 2
+
+
+def test_ack_failure_does_not_restore_old_endpoint(rig):
+    c, cover, _, calls = prepare_command(rig)
+    c.set_live_gate_status('S', 'closed')
+    async def activate(*args, **kwargs): return False
+    c.client.open_gate = activate
+    with pytest.raises(RuntimeError, match='acknowledge'):
+        asyncio.run(cover.async_open_cover())
+    assert cover._live is None

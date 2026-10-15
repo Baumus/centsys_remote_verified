@@ -1,14 +1,12 @@
-# Offline verification — 2026-10-15
+# Offline verification — 0.6.3b3, 2026-10-15
 
-Base: upstream `7c05bec3b83a296cd0dce5548cc2fef6d08b1f77` (post-0.6.3b1).
-Candidate: manifest 0.6.3b2, isolated branch `fix/hacs-verified-position`.
+Base: published 0.6.3b2, commit `76bd5114fa797b7f5dbb7661e7c769c44502f950`.
 
-Observed results:
-- `pytest -q (isolated test environment)`: **113 passed in 0.22s**.
-- `python3 -m compileall -q custom_components`: passed.
-- `git diff HEAD --check`: passed.
-- Final manual diff review: position authority, timers, listener disconnect, retained-frame rejection, subscription failure, endpoint preflight and local command serialization reviewed. No changes to activation packet builders. Original MIT license retained.
+- Isolated `pytest -q`: **124 passed**.
+- `python -m compileall -q custom_components tests`: passed.
+- `git diff --check`: passed.
+- Reviewed production delta: command preflight now shares the TTL-bounded coordinator position with the display; no independent overview request. Endpoint is rechecked after family resolution and consumed before activation. Packet builders and telemetry parser/listener are unchanged.
 
-Covered regressions include HTTP-closed vs MQTT-open, poll and listener ingestion, timer notification/cancellation, unknown/lost input, stationary/moving TTLs, cloud-offline, disconnect/reconnect policy, retained telemetry, rejected subscription, no-op at target endpoint, refusal at unknown/moving/intermediate state and serialization of concurrent HA actions. Existing upstream packet/parser/product-family/region/discovery/legacy tests also pass.
+Regression coverage includes no-op at target, refusal for unknown/moving/intermediate/expired/offline position, avoiding one-shot telemetry, state change or expiry during family lookup, serialized queued calls, endpoint consumption and failed acknowledgements. Existing packet/parser/product-family/region/discovery tests also pass.
 
-No tests used property credentials or a live broker; no HA service calls, installation, reloads or actuation occurred. The AST-based position tests execute selected production methods with fake HA collaborators; they do not attest complete entity registration, config-entry setup or real MQTT delivery. HACS/hassfest validation and full HA runtime startup have not run here. Dashboard YAML is a draft; no rendered visual QA. Overall operational verdict: PARTIAL, pending published-fork CI and supervised hardware acceptance. The cause of the absent live data is not proven fixed.
+Tests are offline source/unit tests with fake HA collaborators. They do not attest full Home Assistant startup, real MQTT delivery or hardware command acceptance. No live broker, private credentials, HA service calls or motor actuation were used. Published-fork HACS/hassfest CI is a separate gate. Overall operational verdict: PARTIAL until supervised hardware acceptance. External controls can race the directionless trigger; no absolute-direction guarantee is claimed.

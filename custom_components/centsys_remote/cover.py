@@ -105,17 +105,20 @@ class CentsysGateCover(CentsysEntity, CoverEntity):
         mac = getattr(device, "mac_address", None)
         if not mac:
             raise HomeAssistantError("No device MAC; cannot verify window position.")
-        overview = await self._read_overview(mac, cached=False)
-        label = getattr(overview, "gate_status", None)
+        # The entity and the command guard share the same TTL-bounded position.
+        # A one-shot MQTT read can time out while the listener receives valid
+        # telemetry; raw cached overviews do not carry a freshness guarantee.
+        label = self._live
         if label not in {"open", "closed"}:
             raise HomeAssistantError(
-                "No verified stationary endpoint; refusing the directionless trigger."
+                "No fresh stationary endpoint in live telemetry; wait for the "
+                "window to be fully open or closed before retrying. No trigger sent."
             )
         if label == target:
             return
-        await self._trigger()
+        await self._trigger(expected_endpoint=label)
 
-    async def _trigger(self) -> None:
+    async def _trigger(self, *, expected_endpoint: str) -> None:
         data = self._device_data or {}
         device = data.get("device")
         mac = getattr(device, "mac_address", None)
@@ -128,6 +131,13 @@ class CentsysGateCover(CentsysEntity, CoverEntity):
         # activation triggers Holiday Lock. Anything not positively a garage
         # (including an operator we can't classify) falls back to the safe TRG.
         is_garage = await self._resolve_family(mac) == "garage"
+        # Resolution may await I/O. Recheck afterwards and consume the endpoint
+        # so a queued action cannot reuse the same pre-command evidence.
+        if self._live != expected_endpoint:
+            raise HomeAssistantError(
+                "Live position changed or expired before activation. No trigger sent."
+            )
+        self.coordinator.set_live_gate_status(self._serial, None)
         try:
             ok = await self.coordinator.client.open_gate(
                 self._serial,
