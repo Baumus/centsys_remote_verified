@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/Baumus/centsys_remote_verified/security/advisories/new
+    about: Do not disclose vulnerabilities, credentials or access data in public issues.
+  - name: Contributing guide
+    url: https://github.com/Baumus/centsys_remote_verified/blob/main/CONTRIBUTING.md
+    about: Development setup, offline tests and contribution process.

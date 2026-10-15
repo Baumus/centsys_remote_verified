@@ -96,7 +96,7 @@ There are no extra Python packages to install by hand — Home Assistant install
 
 1. In HACS, open the **⋮** menu → **Custom repositories**.
 2. Add `https://github.com/Baumus/centsys_remote_verified` with category **Integration**. This preview replaces the upstream provider for the same domain; never install both.
-3. Select **Centsys Remote Verified State (Preview)**, enable pre-release versions and explicitly download **0.6.3b2**. Follow the backup/source-switch instructions in [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md), then restart Home Assistant in a safe maintenance window. Do not delete the existing integration entry.
+3. Select **Centsys Remote Verified State (Preview)**, enable pre-release versions and explicitly download **0.6.3b4**. Follow the backup/source-switch instructions in [RELEASE_CANDIDATE.md](RELEASE_CANDIDATE.md), then restart Home Assistant in a safe maintenance window. Do not delete the existing integration entry.
 
 ### Manual (without HACS)
 
@@ -268,7 +268,7 @@ logger:
 
 You can then watch the logs live under **Settings → System → Logs** (use **Load full logs**), or download them to attach to a bug report.
 
-> **Safe to share.** The integration never writes credentials to the log — each call is recorded as its name, the address and a size, so no tokens, certificates or phone numbers go to disk. Debug logs are safe to attach to an issue, though it's worth a quick skim first, since Home Assistant's other components log independently of this one.
+> **Redact before sharing.** Review logs locally and remove credentials, phone numbers, PINs, tokens, account/device identifiers, private certificate material and location/access details. Never attach raw account exports or Home Assistant backups. Report vulnerabilities privately via [SECURITY.md](SECURITY.md).
 
 To turn debug logging back off, remove those lines and restart, or run the **Logger: Set level** action with level `info`.
 
@@ -305,6 +305,8 @@ Always delete via the UI **before** removing the folder, so Home Assistant can c
 ---
 
 ## Giving feedback
+
+Use this fork's [issue forms](https://github.com/Baumus/centsys_remote_verified/issues/new/choose). For code or documentation contributions, see [CONTRIBUTING.md](CONTRIBUTING.md). Report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 This is a beta — please report anything odd! When opening an issue, it helps to include:
 

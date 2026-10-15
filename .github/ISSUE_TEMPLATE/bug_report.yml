@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible problem in this fork using redacted information.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities use the private security reporting link instead. Do not include phone numbers, PINs, tokens, device IDs, private keys, locations, raw account exports or HA backups."
+  - type: input
+    id: versions
+    attributes:
+      label: Integration version and Home Assistant version
+      placeholder: "Integration v0.6.3b4; HA version; HAOS / Container / Core"
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Operator model, connection type and region
+      description: "Generic model only; no serial/device IDs or precise location. State whether live status is enabled."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction, expected result and actual result
+      description: "Describe what already happened. Do not operate equipment just to fill out this form."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Minimal redacted log excerpt (optional)
+      description: "Inspect and redact locally first. No raw exports, backups, credentials or identifying details."
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked existing issues and removed sensitive information.
+          required: true
